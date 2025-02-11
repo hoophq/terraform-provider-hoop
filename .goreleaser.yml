@@ -49,8 +49,7 @@ checksum:
 signs:
   - cmd: gpg
     artifacts: checksum
-    output: ${signature}
-    args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--pinentry-mode", "loopback", "--output", "${signature}", "--detach-sign", "${artifact}"]
+    args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--pinentry-mode", "loopback", "--detach-sign", "${artifact}"]
 
 # Release customization
 changelog:
@@ -61,7 +60,3 @@ release:
   draft: false
   prerelease: auto
   mode: replace
-
-# Validation
-builds_info:
-  mode: auto
