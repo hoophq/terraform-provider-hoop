@@ -1,58 +1,30 @@
 version: 2
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - binary: '{{ .ProjectName }}'
     env:
       - CGO_ENABLED=0
-    mod_timestamp: '{{ .CommitTimestamp }}'
-    flags:
-      - -trimpath
-    ldflags:
-      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
     goos:
       - linux
       - windows
       - darwin
     goarch:
       - amd64
-      - '386'
       - arm64
-    ignore:
-      - goos: darwin
-        goarch: '386'
 
 archives:
-  - id: terraform-provider
+  - format: zip
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
-      - none*  # Only archive the binary
-    builds_info:
-      group: root
-      owner: root
-    replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      386: i386
-      amd64: x86_64
+      - none*
 
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
-  algorithm: sha256
 
 signs:
   - cmd: gpg
     artifacts: checksum
-    args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--pinentry-mode", "loopback", "--detach-sign", "${artifact}"]
+    args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--detach-sign", "${artifact}"]
 
 changelog:
   disable: true
-
-release:
-  draft: false
-  prerelease: auto
-  mode: replace
