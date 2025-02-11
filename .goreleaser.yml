@@ -1,3 +1,5 @@
+version: 2
+
 before:
   hooks:
     - go mod tidy
@@ -28,6 +30,8 @@ builds:
 archives:
   - format: zip
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - none*
 
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
@@ -46,3 +50,16 @@ signs:
 
 changelog:
   skip: true
+
+# Required for the Terraform Registry
+archives:
+  - format: zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - none*
+    builds_info:
+      group: root
+      owner: root
+    format_overrides:
+      - goos: windows
+        format: zip
