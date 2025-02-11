@@ -1,4 +1,4 @@
-module terraform-provider-hoop
+module github.com/hoophq/terraform-provider-hoop
 
 go 1.22.5
 

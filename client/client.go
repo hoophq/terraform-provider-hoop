@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"terraform-provider-hoop/models"
+
+	"github.com/hoophq/terraform-provider-hoop/models"
 )
 
 type Client struct {

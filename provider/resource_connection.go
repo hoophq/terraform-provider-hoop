@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"terraform-provider-hoop/client"
-	"terraform-provider-hoop/internal"
-	"terraform-provider-hoop/models"
+
+	"github.com/hoophq/terraform-provider-hoop/client"
+	"github.com/hoophq/terraform-provider-hoop/internal"
+	"github.com/hoophq/terraform-provider-hoop/models"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
