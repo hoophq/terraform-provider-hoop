@@ -4,8 +4,10 @@ before:
   hooks:
     - go mod tidy
 
+# Build customization
 builds:
-  - env:
+  - binary: '{{ .ProjectName }}'
+    env:
       - CGO_ENABLED=0
     mod_timestamp: '{{ .CommitTimestamp }}'
     flags:
@@ -13,47 +15,53 @@ builds:
     ldflags:
       - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
     goos:
-      - freebsd
-      - windows
       - linux
+      - windows
       - darwin
     goarch:
       - amd64
       - '386'
-      - arm
       - arm64
     ignore:
       - goos: darwin
         goarch: '386'
-    binary: '{{ .ProjectName }}_v{{ .Version }}'
 
-# Single archives section with all configurations
+# Archive customization
 archives:
-  - format: zip
+  - id: terraform-provider
+    format: zip
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
-      - none*
-    builds_info:
-      group: root
-      owner: root
+      - none*  # Only archive the binary
     format_overrides:
       - goos: windows
         format: zip
+    builds_info:
+      group: root
+      owner: root
 
+# Checksum generation
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
   algorithm: sha256
 
+# Signing configuration
 signs:
-  - artifacts: checksum
-    args:
-      - "--batch"
-      - "--local-user"
-      - "{{ .Env.GPG_FINGERPRINT }}"
-      - "--output"
-      - "${signature}"
-      - "--detach-sign"
-      - "${artifact}"
+  - cmd: gpg
+    artifacts: checksum
+    output: ${signature}
+    args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--pinentry-mode", "loopback", "--output", "${signature}", "--detach-sign", "${artifact}"]
 
+# Release customization
 changelog:
-  skip: true
+  disable: true
+
+# Publisher configuration
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+
+# Validation
+builds_info:
+  mode: auto
