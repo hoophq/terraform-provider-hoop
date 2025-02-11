@@ -1,8 +1,8 @@
 module github.com/hoophq/terraform-provider-hoop
 
-go 1.19
+go 1.22.5
 
-require github.com/hashicorp/terraform-plugin-sdk/v2 v2.31.0
+require github.com/hashicorp/terraform-plugin-sdk/v2 v2.36.0
 
 require (
 	github.com/agext/levenshtein v1.2.2 // indirect

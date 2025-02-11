@@ -4,7 +4,6 @@ before:
   hooks:
     - go mod tidy
 
-# Build customization
 builds:
   - binary: '{{ .ProjectName }}'
     env:
@@ -26,36 +25,33 @@ builds:
       - goos: darwin
         goarch: '386'
 
-# Archive customization
 archives:
   - id: terraform-provider
-    format: zip
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
       - none*  # Only archive the binary
-    format_overrides:
-      - goos: windows
-        format: zip
     builds_info:
       group: root
       owner: root
+    replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
 
-# Checksum generation
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
   algorithm: sha256
 
-# Signing configuration
 signs:
   - cmd: gpg
     artifacts: checksum
     args: ["--batch", "-u", "{{ .Env.GPG_KEY }}", "--passphrase", "{{ .Env.PASSPHRASE }}", "--pinentry-mode", "loopback", "--detach-sign", "${artifact}"]
 
-# Release customization
 changelog:
   disable: true
 
-# Publisher configuration
 release:
   draft: false
   prerelease: auto
