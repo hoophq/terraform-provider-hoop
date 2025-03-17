@@ -49,13 +49,54 @@ Error: Error creating connection: API returned 400: Bad Request
 
 ## Debugging
 
-### Enable Detailed Logs
+### Enable Verbose Logging
 
-Set the following environment variables:
+The Hoop provider uses Terraform's structured logging system to provide detailed information for troubleshooting. To enable logging, set the following environment variables:
 
 ```bash
+# Set log level - options: TRACE, DEBUG, INFO, WARN, ERROR
 export TF_LOG=DEBUG
+
+# Save logs to a file (optional)
 export TF_LOG_PATH=terraform.log
+```
+
+#### Log Levels
+
+- **TRACE**: Most verbose, includes HTTP request/response details and API payloads
+- **DEBUG**: Detailed debugging information, useful for most troubleshooting
+- **INFO**: Normal operation information, confirmations of actions
+- **WARN**: Warning conditions that might need attention
+- **ERROR**: Error conditions that prevented an operation
+
+For the most comprehensive debugging information when reporting issues, use:
+
+```bash
+export TF_LOG=TRACE
+```
+
+### Structured Log Output
+
+The logs include the following structured information:
+
+- Resource type and name
+- API requests details (URLs, headers, method)
+- Response status codes and bodies
+- Error messages with context
+- Changed fields during updates
+
+#### Example Log Output
+
+```
+[INFO]  provider.terraform-provider-hoop: Configuring Hoop provider
+[DEBUG] provider.terraform-provider-hoop: Creating Hoop client: api_url=http://localhost:8009/api
+[INFO]  provider.terraform-provider-hoop: Creating connection resource: resource_type=connection connection_name=test-connection
+[DEBUG] provider.terraform-provider-hoop: Validating connection credentials
+[DEBUG] provider.terraform-provider-hoop: Processing access mode settings
+[TRACE] provider.terraform-provider-hoop: Creating POST request: url=http://localhost:8009/api/connections
+[TRACE] provider.terraform-provider-hoop: Sending POST request: url=http://localhost:8009/api/connections
+[DEBUG] provider.terraform-provider-hoop: Received API response for create: status_code=201
+[INFO]  provider.terraform-provider-hoop: Connection created successfully: name=test-connection
 ```
 
 ### Common Log Messages
@@ -68,6 +109,11 @@ export TF_LOG_PATH=terraform.log
    - Network connectivity issues
    - Firewall rules
    - VPN/proxy settings
+
+3. "API returned error"
+   - Check error response details in the log
+   - Verify API key and permissions
+   - Validate input parameters
 
 ## Best Practices
 

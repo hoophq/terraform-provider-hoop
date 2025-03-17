@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/hoophq/terraform-provider-hoop/client"
 	"github.com/hoophq/terraform-provider-hoop/internal"
 	"github.com/hoophq/terraform-provider-hoop/models"
 
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -60,15 +60,25 @@ func resourceConnection() *schema.Resource {
 }
 
 func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	ctx = tflog.SetField(ctx, "resource_type", "connection")
+	connectionName := d.Get("name").(string)
+	ctx = tflog.SetField(ctx, "connection_name", connectionName)
+	
+	tflog.Info(ctx, "Creating connection resource")
 	c := m.(*client.Client)
 
 	// Process and validate secrets
+	tflog.Debug(ctx, "Validating connection credentials")
 	secrets, err := validateAndParseSecrets(d)
 	if err != nil {
+		tflog.Error(ctx, "Invalid credentials", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(fmt.Errorf("invalid credentials: %v", err))
 	}
 
 	// Get access mode with defaults if not provided
+	tflog.Debug(ctx, "Processing access mode settings")
 	var accessMode map[string]interface{}
 	if v, ok := d.GetOk("access_mode"); ok && len(v.([]interface{})) > 0 {
 		accessMode = v.([]interface{})[0].(map[string]interface{})
@@ -81,7 +91,7 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	connection := &models.Connection{
-		Name:    d.Get("name").(string),
+		Name:    connectionName,
 		Type:    d.Get("type").(string),
 		Subtype: d.Get("subtype").(string),
 		AgentID: d.Get("agent_id").(string),
@@ -105,11 +115,21 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 		connection.JiraIssueTemplateID = v.(string)
 	}
 
+	tflog.Debug(ctx, "Prepared connection model", map[string]interface{}{
+		"type":     connection.Type,
+		"subtype":  connection.Subtype,
+		"agent_id": connection.AgentID,
+	})
+
 	err = c.CreateConnection(ctx, connection)
 	if err != nil {
+		tflog.Error(ctx, "Failed to create connection", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 
+	tflog.Info(ctx, "Successfully created connection, setting ID in state")
 	d.SetId(connection.Name)
 
 	return resourceConnectionRead(ctx, d, m)
@@ -117,23 +137,45 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 
 func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
+	ctx = tflog.SetField(ctx, "resource_type", "connection")
+	ctx = tflog.SetField(ctx, "connection_name", d.Id())
+	
+	tflog.Info(ctx, "Reading connection resource")
 	c := m.(*client.Client)
 
 	connection, err := c.GetConnection(ctx, d.Id())
 	if err != nil {
+		tflog.Error(ctx, "Failed to get connection from API", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 
+	tflog.Debug(ctx, "Setting connection attributes in state")
+	
+	// Set all attributes in state
 	if err := d.Set("type", connection.Type); err != nil {
+		tflog.Error(ctx, "Error setting type", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("subtype", connection.Subtype); err != nil {
+		tflog.Error(ctx, "Error setting subtype", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("agent_id", connection.AgentID); err != nil {
+		tflog.Error(ctx, "Error setting agent_id", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("secrets", connection.Secret); err != nil {
+		tflog.Error(ctx, "Error setting secrets", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 
@@ -145,44 +187,81 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		},
 	}
 	if err := d.Set("access_mode", accessMode); err != nil {
+		tflog.Error(ctx, "Error setting access_mode", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 
+	// Set boolean conversions
 	if err := d.Set("access_schema", connection.AccessSchema == "enabled"); err != nil {
+		tflog.Error(ctx, "Error setting access_schema", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
+	
+	// Set remaining fields
 	if err := d.Set("datamasking", connection.RedactEnabled); err != nil {
+		tflog.Error(ctx, "Error setting datamasking", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("redact_types", connection.RedactTypes); err != nil {
+		tflog.Error(ctx, "Error setting redact_types", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("review_groups", connection.Reviewers); err != nil {
+		tflog.Error(ctx, "Error setting review_groups", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("guardrails", connection.GuardrailRules); err != nil {
+		tflog.Error(ctx, "Error setting guardrails", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("jira_template_id", connection.JiraIssueTemplateID); err != nil {
+		tflog.Error(ctx, "Error setting jira_template_id", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 	if err := d.Set("tags", connection.Tags); err != nil {
+		tflog.Error(ctx, "Error setting tags", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(err)
 	}
 
+	tflog.Info(ctx, "Successfully read connection resource")
 	return diags
 }
 
 func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	ctx = tflog.SetField(ctx, "resource_type", "connection")
+	ctx = tflog.SetField(ctx, "connection_name", d.Id())
+	
+	tflog.Info(ctx, "Updating connection resource")
 	c := m.(*client.Client)
 
 	// Step 1: Get current connection
+	tflog.Debug(ctx, "Retrieving current connection state")
 	existingConnection, err := c.GetConnection(ctx, d.Id())
 	if err != nil {
+		tflog.Error(ctx, "Failed to get existing connection", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(fmt.Errorf("error reading connection for update: %v", err))
 	}
 
 	// Step 2: Build new connection based on the existing one
+	tflog.Debug(ctx, "Building updated connection model")
 	connection := &models.Connection{
 		// Immutable fields
 		Name:    existingConnection.Name,
@@ -205,16 +284,23 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	// Step 3: Update fields that have changed
+	var changedFields []string
 	if d.HasChange("agent_id") {
 		connection.AgentID = d.Get("agent_id").(string)
+		changedFields = append(changedFields, "agent_id")
 	}
 
 	if d.HasChange("secrets") {
+		tflog.Debug(ctx, "Validating updated credentials")
 		parsedSecrets, err := validateAndParseSecrets(d)
 		if err != nil {
+			tflog.Error(ctx, "Invalid credentials in update", map[string]interface{}{
+				"error": err.Error(),
+			})
 			return diag.FromErr(fmt.Errorf("invalid credentials: %v", err))
 		}
 		connection.Secret = parsedSecrets
+		changedFields = append(changedFields, "secrets")
 	}
 
 	if d.HasChange("access_mode") {
@@ -222,69 +308,91 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		connection.AccessModeRunbooks = convertBoolToEnabled(accessMode["runbook"].(bool))
 		connection.AccessModeExec = convertBoolToEnabled(accessMode["web"].(bool))
 		connection.AccessModeConnect = convertBoolToEnabled(accessMode["native"].(bool))
+		changedFields = append(changedFields, "access_mode")
 	}
 
 	if d.HasChange("access_schema") {
 		connection.AccessSchema = convertBoolToEnabled(d.Get("access_schema").(bool))
+		changedFields = append(changedFields, "access_schema")
 	}
 
 	if d.HasChange("datamasking") {
 		connection.RedactEnabled = d.Get("datamasking").(bool)
+		changedFields = append(changedFields, "datamasking")
 	}
 
 	if d.HasChange("redact_types") {
 		connection.RedactTypes = getListWithDefault(d, "redact_types")
+		changedFields = append(changedFields, "redact_types")
 	}
 
 	if d.HasChange("review_groups") {
 		connection.Reviewers = getListWithDefault(d, "review_groups")
+		changedFields = append(changedFields, "review_groups")
 	}
 
 	if d.HasChange("guardrails") {
 		connection.GuardrailRules = getListWithDefault(d, "guardrails")
+		changedFields = append(changedFields, "guardrails")
 	}
 
 	if d.HasChange("jira_template_id") {
 		connection.JiraIssueTemplateID = d.Get("jira_template_id").(string)
+		changedFields = append(changedFields, "jira_template_id")
 	}
 
 	if d.HasChange("tags") {
 		connection.Tags = getListWithDefault(d, "tags")
+		changedFields = append(changedFields, "tags")
 	}
+
+	tflog.Info(ctx, "Updating connection with changed fields", map[string]interface{}{
+		"changed_fields": changedFields,
+	})
 
 	// Step 4: Update the connection
 	err = c.UpdateConnection(ctx, connection)
 	if err != nil {
+		tflog.Error(ctx, "Failed to update connection", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(fmt.Errorf("error updating connection: %v", err))
 	}
 
+	tflog.Info(ctx, "Connection updated successfully")
+	
 	// Read the connection again to ensure state consistency
 	return resourceConnectionRead(ctx, d, m)
 }
 
 func resourceConnectionDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
-	c := m.(*client.Client)
-
+	ctx = tflog.SetField(ctx, "resource_type", "connection")
+	
 	// Get connection name from ID
 	connectionName := d.Id()
-
-	// Log deletion attempt
-	log.Printf("[INFO] Attempting to delete connection %s", connectionName)
+	ctx = tflog.SetField(ctx, "connection_name", connectionName)
+	
+	tflog.Info(ctx, "Deleting connection resource")
+	c := m.(*client.Client)
 
 	// Delete connection
 	if err := c.DeleteConnection(ctx, connectionName); err != nil {
 		// Check if the resource is already gone
 		if strings.Contains(err.Error(), "not found") {
-			log.Printf("[DEBUG] Connection %s was not found - considering delete successful", connectionName)
+			tflog.Debug(ctx, "Connection not found - considering delete successful", map[string]interface{}{
+				"name": connectionName,
+			})
 			return diags
 		}
 
+		tflog.Error(ctx, "Failed to delete connection", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return diag.FromErr(fmt.Errorf("error deleting connection %s: %v", connectionName, err))
 	}
 
-	// Log successful deletion
-	log.Printf("[INFO] Successfully deleted connection %s", connectionName)
+	tflog.Info(ctx, "Connection deleted successfully")
 
 	// Clear the ID from state
 	d.SetId("")

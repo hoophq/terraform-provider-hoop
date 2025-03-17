@@ -53,3 +53,17 @@ provider "hoop" {
 
 * `api_key` - (Required) API key for authentication with Hoop.dev. Can be set using the `HOOP_API_KEY` environment variable.
 * `api_url` - (Required) The URL of your Hoop instance API. Can be set using the `HOOP_API_URL` environment variable.
+
+## Troubleshooting
+
+The Hoop provider includes comprehensive logging capabilities to help debug issues. To enable verbose logging, set:
+
+```bash
+# Set logging level (TRACE, DEBUG, INFO, WARN, ERROR)
+export TF_LOG=DEBUG
+
+# Optionally save logs to a file
+export TF_LOG_PATH=terraform.log
+```
+
+For detailed troubleshooting information, please refer to the [Troubleshooting Guide](guides/troubleshooting.md).
