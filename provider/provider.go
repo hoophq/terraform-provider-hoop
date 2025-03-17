@@ -5,6 +5,7 @@ import (
 
 	"github.com/hoophq/terraform-provider-hoop/client"
 
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -37,10 +38,19 @@ func Provider() *schema.Provider {
 func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
+	// Initialize provider logging
+	ctx = tflog.SetField(ctx, "provider", "hoop")
+	tflog.Info(ctx, "Configuring Hoop provider")
+
 	apiKey := d.Get("api_key").(string)
 	apiUrl := d.Get("api_url").(string)
 
+	tflog.Debug(ctx, "Creating Hoop client", map[string]interface{}{
+		"api_url": apiUrl,
+	})
+
 	c := client.NewClient(apiUrl, apiKey)
 
+	tflog.Info(ctx, "Hoop provider configured successfully")
 	return c, diags
 }
