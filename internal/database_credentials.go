@@ -57,7 +57,6 @@ func ValidateCredentials(dbType string, credentials map[string]interface{}) erro
 	}
 
 	var missingFields []string
-	var invalidFields []string
 
 	// Check required fields and collect missing ones
 	for _, field := range fields {
@@ -70,13 +69,6 @@ func ValidateCredentials(dbType string, credentials map[string]interface{}) erro
 					continue
 				}
 				missingFields = append(missingFields, field.key)
-			}
-		}
-
-		// Additional validation for specific fields
-		if exists {
-			if err := validateFieldValue(field.key, value); err != nil {
-				invalidFields = append(invalidFields, fmt.Sprintf("%s (%s)", field.key, err))
 			}
 		}
 	}
@@ -92,59 +84,8 @@ func ValidateCredentials(dbType string, credentials map[string]interface{}) erro
 		))
 	}
 
-	if len(invalidFields) > 0 {
-		errors = append(errors, fmt.Sprintf(
-			"invalid credential values: %s",
-			strings.Join(invalidFields, ", "),
-		))
-	}
-
 	if len(errors) > 0 {
 		return fmt.Errorf(strings.Join(errors, "; "))
-	}
-
-	return nil
-}
-
-// validateFieldValue performs specific validations for certain field types
-func validateFieldValue(key string, value interface{}) error {
-	strValue, ok := value.(string)
-	if !ok {
-		return fmt.Errorf("expected string value")
-	}
-
-	switch key {
-	case "port":
-		// Port should be a numeric string
-		for _, c := range strValue {
-			if c < '0' || c > '9' {
-				return fmt.Errorf("port must be numeric")
-			}
-		}
-	case "connection_string":
-		// MongoDB connection string should start with mongodb:// or mongodb+srv://
-		if !strings.HasPrefix(strValue, "mongodb://") && !strings.HasPrefix(strValue, "mongodb+srv://") {
-			return fmt.Errorf("must be a valid MongoDB connection string")
-		}
-	case "sslmode":
-		// PostgreSQL sslmode valid values
-		validModes := map[string]bool{
-			"disable":     true,
-			"allow":       true,
-			"prefer":      true,
-			"require":     true,
-			"verify-ca":   true,
-			"verify-full": true,
-			"":            true, // empty is allowed as it's optional
-		}
-		if !validModes[strValue] {
-			return fmt.Errorf("invalid sslmode value")
-		}
-	case "insecure":
-		// MSSQL insecure flag should be "true" or "false"
-		if strValue != "true" && strValue != "false" && strValue != "" {
-			return fmt.Errorf("must be 'true' or 'false'")
-		}
 	}
 
 	return nil
