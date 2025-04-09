@@ -756,6 +756,7 @@ func (c *Client) UpdateAccessGroup(ctx context.Context, accessGroup *models.Acce
 		if len(conn.Config) > 0 {
 			pluginConnections = append(pluginConnections, conn)
 		}
+
 	}
 
 	// Adicionar novas conexões que devem ter acesso

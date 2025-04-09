@@ -27,6 +27,12 @@ resource "hoop_access_group" "db_admins" {
     hoop_connection.postgres_prod.name,
     hoop_connection.mysql_prod.name
   ]
+
+  # IMPORTANT: Using depends_on to prevent race conditions when multiple groups 
+  # are assigned to the same connections. The access_control plugin updates are 
+  # asynchronous, and without this dependency, the second group might overwrite 
+  # rather than append to the connection's group list.
+  depends_on = [hoop_access_group.dev_team]
 }
 
 # Analytics team - has read-only access to specific databases
@@ -39,6 +45,9 @@ resource "hoop_access_group" "analytics" {
     hoop_connection.postgres_prod.name,
     hoop_connection.mysql_prod.name
   ]
+
+  # Ensure this is created after the db_admins group to prevent race conditions
+  depends_on = [hoop_access_group.db_admins]
 }
 
 # Security team - focused on sensitive data monitoring
@@ -50,6 +59,9 @@ resource "hoop_access_group" "security" {
   connections = [
     hoop_connection.postgres_prod.name
   ]
+
+  # Ensure this is created after the analytics group to prevent race conditions
+  depends_on = [hoop_access_group.analytics]
 }
 
 # Output the created access groups for reference

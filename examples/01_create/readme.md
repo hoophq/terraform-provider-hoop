@@ -67,6 +67,30 @@ terraform apply -target=hoop_connection.secure_mongodb
 - Check authentication method
 ```
 
+## Working with Access Groups
+
+When creating multiple access groups that reference the same connections, it's important to use `depends_on` to prevent race conditions:
+
+```bash
+# Create access groups with proper dependencies
+terraform apply -target=hoop_access_group.dev_team
+terraform apply -target=hoop_access_group.db_admins
+terraform apply -target=hoop_access_group.analytics
+```
+
+### Important Note on Race Conditions
+
+The Hoop access_control plugin processes updates asynchronously. When creating multiple access groups for the same connections in quick succession, you might encounter a race condition where one group's configuration overwrites another. Always use `depends_on` between access group resources to establish a clear creation order:
+
+```hcl
+resource "hoop_access_group" "second_group" {
+  # ... configuration ...
+  
+  # This prevents race conditions by ensuring the first group is fully processed
+  depends_on = [hoop_access_group.first_group]
+}
+```
+
 ## Cleanup Options
 
 1. Remove all connections:
@@ -134,6 +158,7 @@ resource "hoop_connection" "secure_postgres" {
 4. Use meaningful connection names
 5. Tag connections appropriately
 6. Document custom configurations
+7. Use `depends_on` between access_group resources to prevent race conditions
 
 ## Next Steps
 

@@ -38,6 +38,33 @@ resource "hoop_access_group" "database_admins" {
 }
 ```
 
+### Managing Multiple Access Groups for Same Connections
+
+When creating multiple access groups that target the same connections, a race condition can occur due to asynchronous updates to the access_control plugin. To prevent this issue, use the `depends_on` attribute to establish a clear creation order:
+
+```hcl
+resource "hoop_access_group" "first_group" {
+  group       = "first_group"
+  description = "First group to access database connections"
+  connections = [
+    "postgres-shared",
+    "mysql-shared"
+  ]
+}
+
+resource "hoop_access_group" "second_group" {
+  group       = "second_group"
+  description = "Second group to access database connections"
+  connections = [
+    "postgres-shared",
+    "mysql-shared"
+  ]
+  
+  # This ensures that the first group is fully created before the second group is processed
+  depends_on = [hoop_access_group.first_group]
+}
+```
+
 ## Argument Reference
 
 The following arguments are supported:
@@ -57,6 +84,12 @@ The following arguments are supported:
 The `hoop_access_group` resource creates and manages an access control mechanism that associates user groups with connections. When a user belonging to a specified group attempts to access Hoop, they will only be able to see and connect to the connections associated with their groups.
 
 Behind the scenes, this resource utilizes Hoop's access_control plugin to manage these associations. Each connection can be accessible by multiple groups, and each group can access multiple connections.
+
+## Race Conditions and Asynchronous Updates
+
+The access_control plugin in Hoop may process updates asynchronously. When creating multiple access groups that reference the same connections in quick succession, the changes from the first group may not be fully synchronized when the second group is created. This can result in the second group overwriting rather than appending to the connection's group list.
+
+To prevent this issue, always use Terraform's `depends_on` attribute to ensure a clear creation order when multiple access groups need to be assigned to the same connections.
 
 ## Attributes Reference
 

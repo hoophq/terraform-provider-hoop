@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     hoop = {
-      source = "registry.terraform.io/local/hoop"
+      source  = "registry.terraform.io/local/hoop"
       version = "1.0.0"
     }
   }
