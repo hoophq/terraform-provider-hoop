@@ -2,14 +2,14 @@
 page_title: "Troubleshooting"
 subcategory: "Guides"
 description: |-
-  Common issues and their solutions when using the Hoop Provider.
+  Common errors and their solutions when using the Hoop Provider.
 ---
 
 # Troubleshooting the Hoop Provider
 
-This guide helps you diagnose and solve common issues when using the Hoop Provider.
+This guide helps you diagnose and solve common errors when using the Hoop Provider.
 
-## Common Issues
+## Common Errors
 
 ### Authentication Failures
 
@@ -47,17 +47,17 @@ Error: Error creating connection: API returned 400: Bad Request
    - Ensure agent is running
    - Verify agent ID in Hoop dashboard
 
-## Access Group Issues
+## Access Group Errors
 
 ### Understanding Access Control Implementation
 
-The `hoop_access_group` resource works by manipulating a plugin called "access_control" in the Hoop backend. This plugin manages the association between user groups and connections. When troubleshooting access control issues, keep the following points in mind:
+The `hoop_access_group` resource works by manipulating a plugin called "access_control" in the Hoop backend. This plugin manages the association between user groups and connections. When troubleshooting access control errors, keep the following points in mind:
 
 1. **Plugin-Based Implementation**: Behind the scenes, the `hoop_access_group` resource creates or updates the "access_control" plugin with the appropriate configurations. This plugin determines which connections are visible to which groups.
 
-2. **Connection IDs vs Names**: While you specify connection names in your Terraform configuration, the underlying implementation uses connection IDs. This is handled automatically by the provider but can be relevant when debugging issues.
+2. **Connection IDs vs Names**: While you specify connection names in your Terraform configuration, the underlying implementation uses connection IDs. This is handled automatically by the provider but can be relevant when debugging errors.
 
-### Common Issues and Solutions
+### Common Errors and Solutions
 
 #### Access Group Created but No Access
 
@@ -124,7 +124,7 @@ export TF_LOG_PATH=terraform.log
 - **WARN**: Warning conditions that might need attention
 - **ERROR**: Error conditions that prevented an operation
 
-For the most comprehensive debugging information when reporting issues, use:
+For the most comprehensive debugging information when reporting errors, use:
 
 ```bash
 export TF_LOG=TRACE
@@ -161,7 +161,7 @@ The logs include the following structured information:
    - Check provider version compatibility
 
 2. "Connection timeout"
-   - Network connectivity issues
+   - Network connectivity errors
    - Firewall rules
    - VPN/proxy settings
 
