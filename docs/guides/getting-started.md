@@ -96,6 +96,40 @@ resource "hoop_connection" "first_db" {
 }
 ```
 
+## Setting Up Access Control
+
+Hoop allows you to control which user groups can access specific connections using the `hoop_access_group` resource. This is a powerful feature for managing access in multi-team environments.
+
+Add the following to your configuration to create an access group for your database team:
+
+```hcl
+resource "hoop_access_group" "db_team" {
+  group       = "db_team"
+  description = "Database team with access to specific databases"
+  
+  connections = [
+    hoop_connection.first_db.name
+  ]
+}
+```
+
+In this example, users belonging to the "db_team" group in your organization will have access to the "first_db" connection.
+
+You can create multiple access groups for different teams or purposes:
+
+```hcl
+resource "hoop_access_group" "dev_team" {
+  group       = "dev_team"
+  description = "Development team access"
+  
+  connections = [
+    hoop_connection.first_db.name
+  ]
+}
+```
+
+Once these access groups are created, users will only be able to see and access the connections associated with their groups, providing a simple yet effective access control mechanism.
+
 ## Initialize and Apply
 
 Initialize Terraform:
@@ -126,3 +160,5 @@ After you've created your first connection, you might want to:
 4. Add guardrails
 
 Check out the [connection resource documentation](../resources/connection.md) for more details on these features.
+
+For more information on access control, see the [access_group resource documentation](../resources/access_group.md).

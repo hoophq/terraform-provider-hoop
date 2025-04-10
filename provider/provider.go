@@ -24,7 +24,8 @@ func Provider() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"hoop_connection": resourceConnection(),
+			"hoop_connection":   resourceConnection(),
+			"hoop_access_group": resourceAccessGroup(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"hoop_connection": dataSourceConnection(),
