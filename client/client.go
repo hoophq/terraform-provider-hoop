@@ -21,9 +21,13 @@ type Client struct {
 
 func NewClient(apiUrl, apiKey string) *Client {
 	return &Client{
-		ApiKey:     apiKey,
-		ApiUrl:     apiUrl,
-		HttpClient: &http.Client{},
+		ApiKey: apiKey,
+		ApiUrl: apiUrl,
+		HttpClient: &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -225,7 +229,13 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 	defer resp.Body.Close()
 
 	tflog.Debug(ctx, "Received API response for create", map[string]interface{}{
-		"status_code": resp.StatusCode,
+		"status_code":     resp.StatusCode,
+		"status":          resp.Status,
+		"request_url":     req.URL.String(),
+		"response_url":    resp.Request.URL.String(),
+		"location_header": resp.Header.Get("Location"),
+		"content_type":    resp.Header.Get("Content-Type"),
+		"content_length":  resp.ContentLength,
 	})
 
 	if resp.StatusCode != 201 {
