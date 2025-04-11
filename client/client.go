@@ -21,13 +21,9 @@ type Client struct {
 
 func NewClient(apiUrl, apiKey string) *Client {
 	return &Client{
-		ApiKey: apiKey,
-		ApiUrl: apiUrl,
-		HttpClient: &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		ApiKey:     apiKey,
+		ApiUrl:     apiUrl,
+		HttpClient: &http.Client{},
 	}
 }
 
