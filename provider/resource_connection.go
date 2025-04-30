@@ -271,21 +271,24 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		})
 		return diag.FromErr(err)
 	}
-	if err := d.Set("redact_types", connection.RedactTypes); err != nil {
+	if err := setArrayFieldInState(d, "redact_types", connection.RedactTypes); err != nil {
 		tflog.Error(ctx, "Error setting redact_types", map[string]interface{}{
 			"error": err.Error(),
+			"value": connection.RedactTypes,
 		})
 		return diag.FromErr(err)
 	}
-	if err := d.Set("review_groups", connection.Reviewers); err != nil {
+	if err := setArrayFieldInState(d, "review_groups", connection.Reviewers); err != nil {
 		tflog.Error(ctx, "Error setting review_groups", map[string]interface{}{
 			"error": err.Error(),
+			"value": connection.Reviewers,
 		})
 		return diag.FromErr(err)
 	}
-	if err := d.Set("guardrails", connection.GuardrailRules); err != nil {
+	if err := setArrayFieldInState(d, "guardrails", connection.GuardrailRules); err != nil {
 		tflog.Error(ctx, "Error setting guardrails", map[string]interface{}{
 			"error": err.Error(),
+			"value": connection.GuardrailRules,
 		})
 		return diag.FromErr(err)
 	}
@@ -420,17 +423,49 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	if d.HasChange("redact_types") {
-		connection.RedactTypes = getListWithDefault(d, "redact_types")
+		oldTypes, newTypes := d.GetChange("redact_types")
+		oldTypesList := convertToStringArray(oldTypes.([]interface{}))
+		newTypesList := convertToStringArray(newTypes.([]interface{}))
+
+		tflog.Debug(ctx, "Redact types changed", map[string]interface{}{
+			"connection_name": connection.Name,
+			"old_types":       oldTypesList,
+			"new_types":       newTypesList,
+		})
+
+		connection.RedactTypes = newTypesList
 		changedFields = append(changedFields, "redact_types")
 	}
 
 	if d.HasChange("review_groups") {
-		connection.Reviewers = getListWithDefault(d, "review_groups")
+		oldGroups, newGroups := d.GetChange("review_groups")
+		oldGroupsList := convertToStringArray(oldGroups.([]interface{}))
+		newGroupsList := convertToStringArray(newGroups.([]interface{}))
+
+		// Log detalhado para troubleshooting
+		tflog.Debug(ctx, "Review groups changed", map[string]interface{}{
+			"connection_name": connection.Name,
+			"old_groups":      oldGroupsList,
+			"new_groups":      newGroupsList,
+		})
+
+		// Garante que array vazio seja transmitido corretamente para a API
+		connection.Reviewers = newGroupsList
 		changedFields = append(changedFields, "review_groups")
 	}
 
 	if d.HasChange("guardrails") {
-		connection.GuardrailRules = getListWithDefault(d, "guardrails")
+		oldRules, newRules := d.GetChange("guardrails")
+		oldRulesList := convertToStringArray(oldRules.([]interface{}))
+		newRulesList := convertToStringArray(newRules.([]interface{}))
+
+		tflog.Debug(ctx, "Guardrail rules changed", map[string]interface{}{
+			"connection_name": connection.Name,
+			"old_rules":       oldRulesList,
+			"new_rules":       newRulesList,
+		})
+
+		connection.GuardrailRules = newRulesList
 		changedFields = append(changedFields, "guardrails")
 	}
 
@@ -571,10 +606,31 @@ func validateAndParseSecrets(d *schema.ResourceData) (map[string]string, error) 
 	return result, nil
 }
 
+// Função mais robusta para tratar listas, especialmente para review_groups
 func getListWithDefault(d *schema.ResourceData, key string) []string {
-	if v, ok := d.GetOk(key); ok {
-		return convertToStringArray(v.([]interface{}))
+	// Verifica se a chave está presente no ResourceData
+	raw, exists := d.GetOk(key)
+
+	// Adicione log detalhado para troubleshooting
+	tflog.Debug(context.Background(), fmt.Sprintf("getListWithDefault: key=%s, exists=%t", key, exists))
+
+	if exists {
+		// Se existe, converte para string array
+		result := convertToStringArray(raw.([]interface{}))
+		tflog.Debug(context.Background(), fmt.Sprintf("getListWithDefault: converted result=%v", result))
+		return result
 	}
+
+	// Importante: Se a chave não existe, mas está definida como um array vazio,
+	// precisamos retornar um array vazio, não null
+	// Usamos hasChange para verificar se houve uma mudança explícita para um array vazio
+	oldRaw, newRaw := d.GetChange(key)
+	if len(oldRaw.([]interface{})) > 0 && len(newRaw.([]interface{})) == 0 {
+		tflog.Debug(context.Background(), fmt.Sprintf("getListWithDefault: detected explicit empty array for key=%s", key))
+		return []string{} // Retorna array vazio explicitamente
+	}
+
+	// Por padrão, retorna um array vazio
 	return []string{}
 }
 
@@ -587,4 +643,22 @@ func getConnectionTagsFromResourceData(d *schema.ResourceData) map[string]string
 		return result
 	}
 	return make(map[string]string)
+}
+
+// Melhor função para lidar com arrays explicitamente vazios vs. null
+func setArrayFieldInState(d *schema.ResourceData, key string, value []string) error {
+	// Se o campo não está definido no config mas está recebendo um valor vazio da API,
+	// não atualizamos o estado, evitando mostrar mudanças falsas
+	if !d.HasChange(key) && len(value) == 0 {
+		// Verifica se o valor atual também é vazio
+		current, ok := d.GetOk(key)
+		if !ok || (ok && len(current.([]interface{})) == 0) {
+			// Ambos são vazios, não precisa atualizar
+			return nil
+		}
+	}
+
+	// Registra as alterações para facilitar o debugging
+	tflog.Debug(context.Background(), fmt.Sprintf("Setting %s in state: %v", key, value))
+	return d.Set(key, value)
 }

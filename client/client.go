@@ -256,10 +256,12 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 
 func (c *Client) UpdateConnection(ctx context.Context, conn *models.Connection) error {
 	tflog.Debug(ctx, "Updating connection", map[string]interface{}{
-		"name":     conn.Name,
-		"type":     conn.Type,
-		"subtype":  conn.Subtype,
-		"agent_id": conn.AgentID,
+		"name":            conn.Name,
+		"type":            conn.Type,
+		"subtype":         conn.Subtype,
+		"agent_id":        conn.AgentID,
+		"review_groups":   conn.Reviewers,      // Log explícito dos review_groups para debugging
+		"guardrail_rules": conn.GuardrailRules, // Outras listas também são importantes
 	})
 
 	jsonData, err := json.Marshal(conn)
@@ -270,6 +272,11 @@ func (c *Client) UpdateConnection(ctx context.Context, conn *models.Connection) 
 		})
 		return fmt.Errorf("error marshaling connection for update: %v", err)
 	}
+
+	// Log do JSON que será enviado para a API para debugging
+	tflog.Trace(ctx, "Update JSON payload", map[string]interface{}{
+		"json": string(jsonData),
+	})
 
 	url := fmt.Sprintf("%s/connections/%s", c.ApiUrl, conn.Name)
 	tflog.Trace(ctx, "Creating PUT request", map[string]interface{}{
