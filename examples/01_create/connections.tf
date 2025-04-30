@@ -15,7 +15,10 @@ resource "hoop_connection" "basic_postgres" {
     sslmode = "prefer"
   }
 
-  tags = ["example", "basic"]
+  connection_tags = {
+    environment = "dev"
+    team        = "engineering"
+  }
 }
 
 # 2. Connection with data masking enabled
@@ -40,7 +43,11 @@ resource "hoop_connection" "masked_postgres" {
     "PHONE_NUMBER"
   ]
 
-  tags = ["example", "masked"]
+  connection_tags = {
+    environment = "dev"
+    sensitivity = "high"
+    type        = "masked"
+  }
 }
 
 # 3. Connection with review process
@@ -60,7 +67,10 @@ resource "hoop_connection" "review_postgres" {
 
   review_groups = ["dba-team", "security-team"]
 
-  tags = ["example", "review"]
+  connection_tags = {
+    environment = "prod"
+    compliance  = "required"
+  }
 }
 
 # 4. Connection with guardrails
@@ -83,7 +93,10 @@ resource "hoop_connection" "secure_postgres" {
     "f8c68e05-7e2c-43b7-9038-cac70a469fa0"
   ]
 
-  tags = ["example", "secure"]
+  connection_tags = {
+    environment = "prod"
+    security    = "high"
+  }
 }
 
 # MySQL Connections
@@ -102,7 +115,10 @@ resource "hoop_connection" "basic_mysql" {
     db   = "standard_db"
   }
 
-  tags = ["example", "mysql"]
+  connection_tags = {
+    environment = "dev"
+    database    = "mysql"
+  }
 }
 
 # 2. Replica database setup
@@ -125,7 +141,11 @@ resource "hoop_connection" "replica_mysql" {
     native  = false # Disable direct connection to replica
   }
 
-  tags = ["example", "mysql", "replica"]
+  connection_tags = {
+    environment = "dev"
+    database    = "mysql"
+    type        = "replica"
+  }
 }
 
 # 3. MySQL with security features
@@ -150,7 +170,11 @@ resource "hoop_connection" "secure_mysql" {
     "f8c68e05-7e2c-43b7-9038-cac70a469fa0"
   ]
 
-  tags = ["example", "mysql", "secure"]
+  connection_tags = {
+    environment = "prod"
+    database    = "mysql"
+    security    = "high"
+  }
 }
 
 # Oracle Database
@@ -169,7 +193,10 @@ resource "hoop_connection" "basic_oracle" {
     sid  = var.database_hosts.oracle.sid
   }
 
-  tags = ["example", "oracle"]
+  connection_tags = {
+    environment = "dev"
+    database    = "oracle"
+  }
 }
 
 # 2. Oracle Enterprise setup
@@ -193,7 +220,11 @@ resource "hoop_connection" "enterprise_oracle" {
   ]
   review_groups = ["oracle-dba"]
 
-  tags = ["example", "oracle", "enterprise"]
+  connection_tags = {
+    environment = "prod"
+    database    = "oracle"
+    type        = "enterprise"
+  }
 }
 
 # MongoDB
@@ -208,7 +239,10 @@ resource "hoop_connection" "basic_mongodb" {
     connection_string = var.database_hosts.mongodb.connection_string
   }
 
-  tags = ["example", "mongodb"]
+  connection_tags = {
+    environment = "dev"
+    database    = "mongodb"
+  }
 }
 
 # 2. MongoDB with connection string and security
@@ -223,5 +257,9 @@ resource "hoop_connection" "secure_mongodb" {
 
   review_groups = ["mongodb-dba"]
 
-  tags = ["example", "mongodb", "secure"]
+  connection_tags = {
+    environment = "prod"
+    database    = "mongodb"
+    type        = "replica"
+  }
 }

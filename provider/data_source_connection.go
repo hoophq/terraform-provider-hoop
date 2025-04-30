@@ -136,8 +136,8 @@ func dataSourceConnectionRead(ctx context.Context, d *schema.ResourceData, m int
 		return diag.FromErr(err)
 	}
 
-	if err := d.Set("tags", connection.Tags); err != nil {
-		tflog.Error(ctx, "Error setting tags", map[string]interface{}{
+	if err := d.Set("connection_tags", connection.ConnectionTags); err != nil {
+		tflog.Error(ctx, "Error setting connection_tags", map[string]interface{}{
 			"error": err.Error(),
 		})
 		return diag.FromErr(err)
