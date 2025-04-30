@@ -130,6 +130,25 @@ resource "hoop_access_group" "dev_team" {
 
 Once these access groups are created, users will only be able to see and access the connections associated with their groups, providing a simple yet effective access control mechanism.
 
+## Configuring Runbooks Paths
+
+Runbooks allow you to create predefined scripts that can be executed against your connections. To organize these runbooks, you can configure a specific path for each connection where Hoop will look for runbook files.
+
+Here's how to configure a runbooks path for a connection:
+
+```hcl
+resource "hoop_runbooks_path" "first_db_runbooks" {
+  connection_id   = hoop_connection.first_db.id
+  connection_name = hoop_connection.first_db.name
+  path            = "/path/to/db/runbooks"
+  
+  # Ensures the connection is created first
+  depends_on = [hoop_connection.first_db]
+}
+```
+
+This configuration tells Hoop to look for runbooks for the "first_db" connection in the "/path/to/db/runbooks" directory. This makes it easy to organize your runbooks by connection and have them automatically available in the Hoop UI.
+
 ## Initialize and Apply
 
 Initialize Terraform:

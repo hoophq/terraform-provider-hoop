@@ -7,12 +7,12 @@ resource "hoop_connection" "basic_postgres" {
   agent_id = var.agent_id
 
   secrets = {
-    host     = var.database_hosts.postgres.host
-    port     = var.database_hosts.postgres.port
-    user     = var.database_credentials.basic.user
-    pass     = var.database_credentials.basic.password
-    db       = "basic_db"
-    sslmode  = "prefer"
+    host    = var.database_hosts.postgres.host
+    port    = var.database_hosts.postgres.port
+    user    = var.database_credentials.basic.user
+    pass    = var.database_credentials.basic.password
+    db      = "basic_db"
+    sslmode = "prefer"
   }
 
   tags = ["example", "basic"]
@@ -25,12 +25,12 @@ resource "hoop_connection" "masked_postgres" {
   agent_id = var.agent_id
 
   secrets = {
-    host     = var.database_hosts.postgres.host
-    port     = var.database_hosts.postgres.port
-    user     = var.database_credentials.basic.user
-    pass     = var.database_credentials.basic.password
-    db       = "masked_db"
-    sslmode  = "prefer"
+    host    = var.database_hosts.postgres.host
+    port    = var.database_hosts.postgres.port
+    user    = var.database_credentials.basic.user
+    pass    = var.database_credentials.basic.password
+    db      = "masked_db"
+    sslmode = "prefer"
   }
 
   datamasking = true
@@ -50,12 +50,12 @@ resource "hoop_connection" "review_postgres" {
   agent_id = var.agent_id
 
   secrets = {
-    host     = var.database_hosts.postgres.host
-    port     = var.database_hosts.postgres.port
-    user     = var.database_credentials.basic.user
-    pass     = var.database_credentials.basic.password
-    db       = "review_db"
-    sslmode  = "verify-full"
+    host    = var.database_hosts.postgres.host
+    port    = var.database_hosts.postgres.port
+    user    = var.database_credentials.basic.user
+    pass    = var.database_credentials.basic.password
+    db      = "review_db"
+    sslmode = "verify-full"
   }
 
   review_groups = ["dba-team", "security-team"]
@@ -70,12 +70,12 @@ resource "hoop_connection" "secure_postgres" {
   agent_id = var.agent_id
 
   secrets = {
-    host     = var.database_hosts.postgres.host
-    port     = var.database_hosts.postgres.port
-    user     = var.database_credentials.basic.user
-    pass     = var.database_credentials.basic.password
-    db       = "secure_db"
-    sslmode  = "verify-full"
+    host    = var.database_hosts.postgres.host
+    port    = var.database_hosts.postgres.port
+    user    = var.database_credentials.basic.user
+    pass    = var.database_credentials.basic.password
+    db      = "secure_db"
+    sslmode = "verify-full"
   }
 
   guardrails = [
@@ -122,7 +122,7 @@ resource "hoop_connection" "replica_mysql" {
   access_mode {
     runbook = true
     web     = true
-    native  = false  # Disable direct connection to replica
+    native  = false # Disable direct connection to replica
   }
 
   tags = ["example", "mysql", "replica"]
@@ -142,13 +142,13 @@ resource "hoop_connection" "secure_mysql" {
     db   = "secure_db"
   }
 
-  datamasking = true
-  redact_types = ["EMAIL_ADDRESS"]
+  datamasking   = true
+  redact_types  = ["EMAIL_ADDRESS"]
   review_groups = ["dba-team"]
   guardrails = [
     "593ad7f2-a1cd-4c33-a0e0-b6bdebd65c5c",
     "f8c68e05-7e2c-43b7-9038-cac70a469fa0"
-    ]
+  ]
 
   tags = ["example", "mysql", "secure"]
 }
@@ -222,6 +222,6 @@ resource "hoop_connection" "secure_mongodb" {
   }
 
   review_groups = ["mongodb-dba"]
-  
+
   tags = ["example", "mongodb", "secure"]
 }

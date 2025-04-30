@@ -63,7 +63,7 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
 	connectionName := d.Get("name").(string)
 	ctx = tflog.SetField(ctx, "connection_name", connectionName)
-	
+
 	tflog.Info(ctx, "Creating connection resource")
 	c := m.(*client.Client)
 
@@ -121,7 +121,7 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 		"agent_id": connection.AgentID,
 	})
 
-	err = c.CreateConnection(ctx, connection)
+	conn, err := c.CreateConnection(ctx, connection)
 	if err != nil {
 		tflog.Error(ctx, "Failed to create connection", map[string]interface{}{
 			"error": err.Error(),
@@ -130,7 +130,7 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	tflog.Info(ctx, "Successfully created connection, setting ID in state")
-	d.SetId(connection.Name)
+	d.SetId(conn.ID)
 
 	return resourceConnectionRead(ctx, d, m)
 }
@@ -139,7 +139,7 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 	var diags diag.Diagnostics
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
 	ctx = tflog.SetField(ctx, "connection_name", d.Id())
-	
+
 	tflog.Info(ctx, "Reading connection resource")
 	c := m.(*client.Client)
 
@@ -152,7 +152,7 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 	}
 
 	tflog.Debug(ctx, "Setting connection attributes in state")
-	
+
 	// Set all attributes in state
 	if err := d.Set("type", connection.Type); err != nil {
 		tflog.Error(ctx, "Error setting type", map[string]interface{}{
@@ -200,7 +200,7 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		})
 		return diag.FromErr(err)
 	}
-	
+
 	// Set remaining fields
 	if err := d.Set("datamasking", connection.RedactEnabled); err != nil {
 		tflog.Error(ctx, "Error setting datamasking", map[string]interface{}{
@@ -246,7 +246,7 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
 	ctx = tflog.SetField(ctx, "connection_name", d.Id())
-	
+
 	tflog.Info(ctx, "Updating connection resource")
 	c := m.(*client.Client)
 
@@ -360,7 +360,7 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	tflog.Info(ctx, "Connection updated successfully")
-	
+
 	// Read the connection again to ensure state consistency
 	return resourceConnectionRead(ctx, d, m)
 }
@@ -368,11 +368,11 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 func resourceConnectionDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
-	
+
 	// Get connection name from ID
 	connectionName := d.Id()
 	ctx = tflog.SetField(ctx, "connection_name", connectionName)
-	
+
 	tflog.Info(ctx, "Deleting connection resource")
 	c := m.(*client.Client)
 

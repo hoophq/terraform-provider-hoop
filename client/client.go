@@ -177,7 +177,7 @@ func (c *Client) DeleteConnection(ctx context.Context, name string) error {
 	}
 }
 
-func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) error {
+func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) (*models.Connection, error) {
 	tflog.Debug(ctx, "Creating connection", map[string]interface{}{
 		"name":     conn.Name,
 		"type":     conn.Type,
@@ -191,7 +191,7 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 			"error": err.Error(),
 			"name":  conn.Name,
 		})
-		return fmt.Errorf("failed to marshal connection data: %v", err)
+		return nil, fmt.Errorf("failed to marshal connection data: %v", err)
 	}
 
 	url := fmt.Sprintf("%s/connections", c.ApiUrl)
@@ -205,7 +205,7 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 			"error": err.Error(),
 			"url":   url,
 		})
-		return fmt.Errorf("failed to create POST request: %v", err)
+		return nil, fmt.Errorf("failed to create POST request: %v", err)
 	}
 
 	req.Header.Set("Api-Key", c.ApiKey)
@@ -220,7 +220,7 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 			"error": err.Error(),
 			"url":   url,
 		})
-		return fmt.Errorf("failed to execute POST request: %v", err)
+		return nil, fmt.Errorf("failed to execute POST request: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -234,21 +234,24 @@ func (c *Client) CreateConnection(ctx context.Context, conn *models.Connection) 
 		"content_length":  resp.ContentLength,
 	})
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	responseBodyConnection := &models.Connection{}
+	json.Unmarshal(bodyBytes, responseBodyConnection)
+
 	if resp.StatusCode != 201 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
 		responseBody := string(bodyBytes)
 		tflog.Error(ctx, "API returned error for create", map[string]interface{}{
 			"status_code": resp.StatusCode,
 			"body":        responseBody,
 		})
-		return fmt.Errorf("API returned %d: %s", resp.StatusCode, responseBody)
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, responseBody)
 	}
 
 	tflog.Info(ctx, "Connection created successfully", map[string]interface{}{
 		"name": conn.Name,
 	})
 
-	return nil
+	return responseBodyConnection, nil
 }
 
 func (c *Client) UpdateConnection(ctx context.Context, conn *models.Connection) error {
