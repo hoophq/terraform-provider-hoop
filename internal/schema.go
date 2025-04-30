@@ -75,6 +75,27 @@ func SecretsSchema(computed bool) *schema.Schema {
 		Elem: &schema.Schema{
 			Type: schema.TypeString,
 		},
+		DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+			// If we're creating a new resource, we need to set the secrets
+			if d.Id() == "" {
+				return false
+			}
+
+			// If we're comparing the same values, don't trigger a change
+			if old == new {
+				return true
+			}
+
+			// For partial updates, don't suppress the diff
+			oldSecrets, newSecrets := d.GetChange("secrets")
+			if oldSecrets == nil || newSecrets == nil {
+				return false
+			}
+
+			// Only trigger an update if the user explicitly changed the secrets
+			// This will prevent Terraform from showing a diff when nothing actually changed
+			return !d.HasChange("secrets")
+		},
 	}
 }
 
@@ -158,6 +179,32 @@ func CommonConnectionSchema(isResource bool) map[string]*schema.Schema {
 				Type: schema.TypeString,
 			},
 		},
+	}
+
+	// Add DiffSuppressFunc only for resource, not for data source
+	if isResource {
+		secretsSchema := s["secrets"]
+		secretsSchema.DiffSuppressFunc = func(k, old, new string, d *schema.ResourceData) bool {
+			// If we're creating a new resource, we need to set the secrets
+			if d.Id() == "" {
+				return false
+			}
+
+			// If we're comparing the same values, don't trigger a change
+			if old == new {
+				return true
+			}
+
+			// For partial updates, don't suppress the diff
+			oldSecrets, newSecrets := d.GetChange("secrets")
+			if oldSecrets == nil || newSecrets == nil {
+				return false
+			}
+
+			// Only trigger an update if the user explicitly changed the secrets
+			// This will prevent Terraform from showing a diff when nothing actually changed
+			return !d.HasChange("secrets")
+		}
 	}
 
 	return s

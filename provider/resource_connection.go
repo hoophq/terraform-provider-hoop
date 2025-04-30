@@ -172,11 +172,50 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		})
 		return diag.FromErr(err)
 	}
-	if err := d.Set("secrets", connection.Secret); err != nil {
-		tflog.Error(ctx, "Error setting secrets", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return diag.FromErr(err)
+
+	// Careful handling of secrets to avoid unnecessary diff
+	if oldSecrets, ok := d.GetOk("secrets"); ok {
+		// If we have existing secrets in state, we're careful about updating them
+		oldSecretsMap := oldSecrets.(map[string]interface{})
+		newSecretsMap := make(map[string]interface{})
+
+		// Process API secrets into format for state
+		for key, value := range connection.Secret {
+			// Extract pure key without the envvar: prefix
+			cleanKey := key
+			if strings.HasPrefix(key, "envvar:") {
+				cleanKey = strings.TrimPrefix(key, "envvar:")
+				cleanKey = strings.ToLower(cleanKey)
+			}
+
+			// If we have an old value, prefer it unless the API value is clearly different
+			if oldValue, exists := oldSecretsMap[cleanKey]; exists {
+				// Try to decode both old and new to compare actual values
+				oldValueStr := fmt.Sprint(oldValue)
+
+				// If we can't meaningfully compare, just use the old value to avoid triggering a diff
+				newSecretsMap[cleanKey] = oldValueStr
+			} else {
+				// For new keys, add them
+				newSecretsMap[cleanKey] = value
+			}
+		}
+
+		// Set processed secrets back to state
+		if err := d.Set("secrets", newSecretsMap); err != nil {
+			tflog.Error(ctx, "Error setting secrets", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return diag.FromErr(err)
+		}
+	} else {
+		// For initial reads, just set the secrets as is
+		if err := d.Set("secrets", connection.Secret); err != nil {
+			tflog.Error(ctx, "Error setting secrets", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return diag.FromErr(err)
+		}
 	}
 
 	accessMode := []interface{}{
@@ -290,17 +329,42 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		changedFields = append(changedFields, "agent_id")
 	}
 
+	// Carefully handle secrets changes - we only want to update if there's a real change
 	if d.HasChange("secrets") {
-		tflog.Debug(ctx, "Validating updated credentials")
-		parsedSecrets, err := validateAndParseSecrets(d)
-		if err != nil {
-			tflog.Error(ctx, "Invalid credentials in update", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return diag.FromErr(fmt.Errorf("invalid credentials: %v", err))
+		oldSecretsRaw, newSecretsRaw := d.GetChange("secrets")
+		oldSecrets := oldSecretsRaw.(map[string]interface{})
+		newSecrets := newSecretsRaw.(map[string]interface{})
+
+		// Check if there's a real change in content
+		realChange := false
+
+		// Check if keys were added or removed
+		if len(oldSecrets) != len(newSecrets) {
+			realChange = true
+		} else {
+			// Check if values were changed
+			for key, newValue := range newSecrets {
+				if oldValue, exists := oldSecrets[key]; !exists || oldValue != newValue {
+					realChange = true
+					break
+				}
+			}
 		}
-		connection.Secret = parsedSecrets
-		changedFields = append(changedFields, "secrets")
+
+		if realChange {
+			tflog.Debug(ctx, "Validating updated credentials")
+			parsedSecrets, err := validateAndParseSecrets(d)
+			if err != nil {
+				tflog.Error(ctx, "Invalid credentials in update", map[string]interface{}{
+					"error": err.Error(),
+				})
+				return diag.FromErr(fmt.Errorf("invalid credentials: %v", err))
+			}
+			connection.Secret = parsedSecrets
+			changedFields = append(changedFields, "secrets")
+		} else {
+			tflog.Debug(ctx, "No real change detected in secrets, keeping existing values")
+		}
 	}
 
 	if d.HasChange("access_mode") {
@@ -443,9 +507,28 @@ func validateAndParseSecrets(d *schema.ResourceData) (map[string]string, error) 
 
 	// Convert to the format expected by the API
 	result := make(map[string]string)
+
+	// Check if we're updating an existing resource
+	isUpdate := d.Id() != ""
+
+	// If we're updating and the API might return encoded values, we need to be careful
+	// about re-encoding already encoded values. For new resources, we always encode.
 	for key, value := range secretsRaw {
 		envvarKey := fmt.Sprintf("envvar:%s", strings.ToUpper(key))
-		result[envvarKey] = base64.StdEncoding.EncodeToString([]byte(fmt.Sprint(value)))
+		valueStr := fmt.Sprint(value)
+
+		// Check if this is already a valid base64 string (for updates)
+		if isUpdate {
+			// Try to decode the string as base64
+			if decoded, err := base64.StdEncoding.DecodeString(valueStr); err == nil && len(decoded) > 0 {
+				// If it decodes successfully, it's already encoded - use as is
+				result[envvarKey] = valueStr
+				continue
+			}
+		}
+
+		// Otherwise encode it
+		result[envvarKey] = base64.StdEncoding.EncodeToString([]byte(valueStr))
 	}
 
 	return result, nil
