@@ -79,15 +79,29 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	// Get access mode with defaults if not provided
 	tflog.Debug(ctx, "Processing access mode settings")
+
+	// Verificar se access_mode foi explicitamente definido
 	var accessMode map[string]interface{}
-	if v, ok := d.GetOk("access_mode"); ok && len(v.([]interface{})) > 0 {
-		accessMode = v.([]interface{})[0].(map[string]interface{})
+	accessModeRaw, accessModeSpecified := d.GetOk("access_mode")
+
+	if accessModeSpecified && len(accessModeRaw.([]interface{})) > 0 {
+		// Se especificado, use os valores definidos pelo usuário
+		accessMode = accessModeRaw.([]interface{})[0].(map[string]interface{})
+		tflog.Debug(ctx, "Using explicitly defined access_mode", map[string]interface{}{
+			"runbook": accessMode["runbook"],
+			"web":     accessMode["web"],
+			"native":  accessMode["native"],
+		})
 	} else {
+		// Caso contrário, use os valores padrão
 		accessMode = map[string]interface{}{
 			"runbook": true,
 			"web":     true,
 			"native":  true,
 		}
+		tflog.Debug(ctx, "Using default access_mode values", map[string]interface{}{
+			"is_specified": accessModeSpecified,
+		})
 	}
 
 	connection := &models.Connection{
@@ -218,18 +232,28 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		}
 	}
 
-	accessMode := []interface{}{
-		map[string]interface{}{
-			"runbook": connection.AccessModeRunbooks == "enabled",
-			"web":     connection.AccessModeExec == "enabled",
-			"native":  connection.AccessModeConnect == "enabled",
-		},
-	}
-	if err := d.Set("access_mode", accessMode); err != nil {
-		tflog.Error(ctx, "Error setting access_mode", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return diag.FromErr(err)
+	// Handle access_mode carefully to avoid unnecessary diffs
+	// Only set access_mode if it was explicitly specified in the config
+	_, accessModeSpecified := d.GetOk("access_mode")
+
+	if accessModeSpecified {
+		accessMode := []interface{}{
+			map[string]interface{}{
+				"runbook": connection.AccessModeRunbooks == "enabled",
+				"web":     connection.AccessModeExec == "enabled",
+				"native":  connection.AccessModeConnect == "enabled",
+			},
+		}
+		if err := d.Set("access_mode", accessMode); err != nil {
+			tflog.Error(ctx, "Error setting access_mode", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return diag.FromErr(err)
+		}
+	} else {
+		// If access_mode wasn't specified in the config, don't set it in the state
+		// This prevents Terraform from showing a diff for default values
+		tflog.Debug(ctx, "access_mode not explicitly specified in config, skipping state update")
 	}
 
 	// Set boolean conversions
@@ -367,12 +391,22 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		}
 	}
 
+	// Verifique cuidadosamente as alterações no access_mode
 	if d.HasChange("access_mode") {
-		accessMode := getAccessMode(d)
-		connection.AccessModeRunbooks = convertBoolToEnabled(accessMode["runbook"].(bool))
-		connection.AccessModeExec = convertBoolToEnabled(accessMode["web"].(bool))
-		connection.AccessModeConnect = convertBoolToEnabled(accessMode["native"].(bool))
-		changedFields = append(changedFields, "access_mode")
+		// Verifica se o access_mode está explicitamente definido na configuração
+		_, explicitlyDefined := d.GetOk("access_mode")
+
+		if explicitlyDefined {
+			// Se explicitamente definido, atualiza com os novos valores
+			accessMode := getAccessMode(d)
+			connection.AccessModeRunbooks = convertBoolToEnabled(accessMode["runbook"].(bool))
+			connection.AccessModeExec = convertBoolToEnabled(accessMode["web"].(bool))
+			connection.AccessModeConnect = convertBoolToEnabled(accessMode["native"].(bool))
+			changedFields = append(changedFields, "access_mode")
+		} else {
+			// Se não estiver explicitamente definido, não considere como uma mudança real
+			tflog.Debug(ctx, "access_mode não está explicitamente definido na configuração, ignorando mudança aparente")
+		}
 	}
 
 	if d.HasChange("access_schema") {
@@ -465,12 +499,15 @@ func resourceConnectionDelete(ctx context.Context, d *schema.ResourceData, m int
 }
 
 func getAccessMode(d *schema.ResourceData) map[string]interface{} {
-	if v, ok := d.GetOk("access_mode"); ok {
-		if len(v.([]interface{})) > 0 {
-			return v.([]interface{})[0].(map[string]interface{})
-		}
+	// Verificar se access_mode foi explicitamente definido na configuração
+	v, explicitlySet := d.GetOk("access_mode")
+
+	// Se foi explicitamente definido e tem elementos, use esses valores
+	if explicitlySet && len(v.([]interface{})) > 0 {
+		return v.([]interface{})[0].(map[string]interface{})
 	}
-	// Return default values if not set
+
+	// Se não foi explicitamente definido, use os valores padrão
 	return map[string]interface{}{
 		"runbook": true,
 		"web":     true,

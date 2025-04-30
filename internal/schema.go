@@ -26,26 +26,26 @@ func AccessModeSchema(computed bool) *schema.Schema {
 	s := &schema.Schema{
 		Type:     schema.TypeList,
 		Optional: !computed,
-		Computed: computed,
+		Computed: true,
 		MaxItems: 1,
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"runbook": {
 					Type:     schema.TypeBool,
 					Optional: !computed,
-					Computed: computed,
+					Computed: true,
 					Default:  true,
 				},
 				"web": {
 					Type:     schema.TypeBool,
 					Optional: !computed,
-					Computed: computed,
+					Computed: true,
 					Default:  true,
 				},
 				"native": {
 					Type:     schema.TypeBool,
 					Optional: !computed,
-					Computed: computed,
+					Computed: true,
 					Default:  true,
 				},
 			},
@@ -216,6 +216,7 @@ func getAccessModeSchema(isResource bool) *schema.Schema {
 		return &schema.Schema{
 			Type:     schema.TypeList,
 			Optional: true,
+			Computed: true,
 			MaxItems: 1,
 			Elem: &schema.Resource{
 				Schema: map[string]*schema.Schema{
@@ -235,6 +236,12 @@ func getAccessModeSchema(isResource bool) *schema.Schema {
 						Default:  true,
 					},
 				},
+			},
+			DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+				if !d.GetRawConfig().GetAttr("access_mode").IsKnown() {
+					return true
+				}
+				return false
 			},
 		}
 	}
