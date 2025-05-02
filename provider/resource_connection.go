@@ -104,10 +104,13 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 		})
 	}
 
+	connType := d.Get("type").(string)
+	subtype := d.Get("subtype").(string)
+
 	connection := &models.Connection{
 		Name:    connectionName,
-		Type:    d.Get("type").(string),
-		Subtype: d.Get("subtype").(string),
+		Type:    connType,
+		Subtype: subtype,
 		AgentID: d.Get("agent_id").(string),
 		Secret:  secrets,
 
@@ -123,6 +126,13 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 		Reviewers:      getListWithDefault(d, "review_groups"),
 		GuardrailRules: getListWithDefault(d, "guardrails"),
 		Tags:           getConnectionTagsFromResourceData(d),
+	}
+
+	// Add command for custom connections
+	if connType == "custom" {
+		if v, ok := d.GetOk("command"); ok {
+			connection.Command = convertToStringArray(v.([]interface{}))
+		}
 	}
 
 	if v, ok := d.GetOk("jira_template_id"); ok {
@@ -185,6 +195,17 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 			"error": err.Error(),
 		})
 		return diag.FromErr(err)
+	}
+
+	// Set command for custom connections
+	if connection.Type == "custom" {
+		if err := setArrayFieldInState(d, "command", connection.Command); err != nil {
+			tflog.Error(ctx, "Error setting command", map[string]interface{}{
+				"error": err.Error(),
+				"value": connection.Command,
+			})
+			return diag.FromErr(err)
+		}
 	}
 
 	// Careful handling of secrets to avoid unnecessary diff
@@ -347,6 +368,7 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		GuardrailRules:      existingConnection.GuardrailRules,
 		JiraIssueTemplateID: existingConnection.JiraIssueTemplateID,
 		Tags:                existingConnection.Tags,
+		Command:             existingConnection.Command,
 	}
 
 	// Step 3: Update fields that have changed
@@ -354,6 +376,16 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 	if d.HasChange("agent_id") {
 		connection.AgentID = d.Get("agent_id").(string)
 		changedFields = append(changedFields, "agent_id")
+	}
+
+	// Update command for custom connections
+	if connection.Type == "custom" && d.HasChange("command") {
+		if v, ok := d.GetOk("command"); ok {
+			connection.Command = convertToStringArray(v.([]interface{}))
+		} else {
+			connection.Command = []string{}
+		}
+		changedFields = append(changedFields, "command")
 	}
 
 	// Carefully handle secrets changes - we only want to update if there's a real change
@@ -567,15 +599,17 @@ func convertBoolToEnabled(value bool) string {
 }
 
 func validateAndParseSecrets(d *schema.ResourceData) (map[string]string, error) {
+	connType := d.Get("type").(string)
 	subtype := d.Get("subtype").(string)
 	secretsRaw := d.Get("secrets").(map[string]interface{})
 
-	// Validate credentials if it's a database type
-	if d.Get("type").(string) == "database" {
-		if err := internal.ValidateCredentials(subtype, secretsRaw); err != nil {
+	// Validate credentials for database connections
+	if connType == "database" {
+		if err := internal.ValidateCredentials(secretsRaw, subtype); err != nil {
 			return nil, err
 		}
 	}
+	// For custom connections, no validation needed
 
 	// Convert to the format expected by the API
 	result := make(map[string]string)
@@ -586,21 +620,38 @@ func validateAndParseSecrets(d *schema.ResourceData) (map[string]string, error) 
 	// If we're updating and the API might return encoded values, we need to be careful
 	// about re-encoding already encoded values. For new resources, we always encode.
 	for key, value := range secretsRaw {
-		envvarKey := fmt.Sprintf("envvar:%s", strings.ToUpper(key))
 		valueStr := fmt.Sprint(value)
+
+		var finalKey string
+
+		// Check if the key already has a prefix
+		if strings.HasPrefix(strings.ToLower(key), "envvar:") {
+			// Keep the prefix, but uppercase the key
+			prefix := "envvar:"
+			cleanKey := strings.TrimPrefix(strings.ToLower(key), prefix)
+			finalKey = prefix + strings.ToUpper(cleanKey)
+		} else if strings.HasPrefix(strings.ToLower(key), "filesystem:") {
+			// Keep the prefix, but uppercase the key
+			prefix := "filesystem:"
+			cleanKey := strings.TrimPrefix(strings.ToLower(key), prefix)
+			finalKey = prefix + strings.ToUpper(cleanKey)
+		} else {
+			// No prefix, add envvar: prefix and uppercase the key
+			finalKey = fmt.Sprintf("envvar:%s", strings.ToUpper(key))
+		}
 
 		// Check if this is already a valid base64 string (for updates)
 		if isUpdate {
 			// Try to decode the string as base64
 			if decoded, err := base64.StdEncoding.DecodeString(valueStr); err == nil && len(decoded) > 0 {
 				// If it decodes successfully, it's already encoded - use as is
-				result[envvarKey] = valueStr
+				result[finalKey] = valueStr
 				continue
 			}
 		}
 
 		// Otherwise encode it
-		result[envvarKey] = base64.StdEncoding.EncodeToString([]byte(valueStr))
+		result[finalKey] = base64.StdEncoding.EncodeToString([]byte(valueStr))
 	}
 
 	return result, nil

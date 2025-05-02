@@ -128,6 +128,14 @@ func CommonConnectionSchema(isResource bool) map[string]*schema.Schema {
 				Type: schema.TypeString,
 			},
 		},
+		"command": {
+			Type:        schema.TypeList,
+			Optional:    true,
+			Description: "Command to execute for custom connections",
+			Elem: &schema.Schema{
+				Type: schema.TypeString,
+			},
+		},
 		"access_mode": getAccessModeSchema(isResource),
 		"access_schema": {
 			Type:     schema.TypeBool,

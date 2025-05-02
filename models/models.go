@@ -20,6 +20,7 @@ type Connection struct {
 	GuardrailRules      []string               `json:"guardrail_rules"`
 	JiraIssueTemplateID string                 `json:"jira_issue_template_id,omitempty"`
 	Tags                map[string]string      `json:"connection_tags"`
+	Command             []string               `json:"command,omitempty"`
 }
 
 type AccessGroup struct {

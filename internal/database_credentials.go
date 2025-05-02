@@ -49,23 +49,31 @@ type credentialField struct {
 	defaultValue string
 }
 
-// ValidateCredentials checks if all required credentials are present for the given database type
-func ValidateCredentials(dbType string, credentials map[string]interface{}) error {
-	fields, ok := databaseCredentials[dbType]
-	if !ok {
-		return fmt.Errorf("unsupported database type: %s", dbType)
+// ValidateCredentials checks if all required credentials are present
+func ValidateCredentials(config map[string]interface{}, subtype string) error {
+	// Handle custom connection type
+	if subtype == "custom" {
+		// Custom connections have flexible credentials format
+		// No validation needed for custom connections
+		return nil
 	}
 
+	// For database connections, validate specific credentials
 	var missingFields []string
+
+	fields, ok := databaseCredentials[subtype]
+	if !ok {
+		return fmt.Errorf("unsupported database type: %s", subtype)
+	}
 
 	// Check required fields and collect missing ones
 	for _, field := range fields {
-		value, exists := credentials[field.key]
+		value, exists := config[field.key]
 
 		if field.required {
 			if !exists || value == "" {
 				if field.defaultValue != "" {
-					credentials[field.key] = field.defaultValue
+					config[field.key] = field.defaultValue
 					continue
 				}
 				missingFields = append(missingFields, field.key)
@@ -73,20 +81,33 @@ func ValidateCredentials(dbType string, credentials map[string]interface{}) erro
 		}
 	}
 
-	// Build error message if there are any issues
-	var errors []string
-
-	if len(missingFields) > 0 {
-		errors = append(errors, fmt.Sprintf(
-			"missing required credentials for %s: %s",
-			dbType,
-			strings.Join(missingFields, ", "),
-		))
+	// Add some defaults if needed
+	if _, exists := config["port"]; !exists && subtype != "bigquery" {
+		config["port"] = getDefaultPort(subtype)
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "; "))
+	// if we have any missing fields, build an error message
+	if len(missingFields) > 0 {
+		return fmt.Errorf("missing required fields for %s: %s", subtype, strings.Join(missingFields, ", "))
 	}
 
 	return nil
+}
+
+// getDefaultPort returns the default port for each database type
+func getDefaultPort(dbType string) string {
+	switch dbType {
+	case "mysql":
+		return "3306"
+	case "postgresql":
+		return "5432"
+	case "mssql":
+		return "1433"
+	case "oracle":
+		return "1521"
+	case "mongodb":
+		return "27017"
+	default:
+		return ""
+	}
 }
