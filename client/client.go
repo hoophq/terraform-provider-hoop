@@ -943,3 +943,221 @@ func generateUUID() string {
 	// Um UUID simples para uso no provider
 	return "28ba4b85-b4a8-4c55-8f5e-34edc9aa62c8"
 }
+
+// GetUserGroups lista todos os grupos existentes
+func (c *Client) GetUserGroups(ctx context.Context) ([]string, error) {
+	tflog.Debug(ctx, "Getting user groups")
+
+	url := fmt.Sprintf("%s/users/groups", c.ApiUrl)
+	tflog.Trace(ctx, "Creating GET request", map[string]interface{}{
+		"url": url,
+	})
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		tflog.Error(ctx, "Failed to create GET request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return nil, fmt.Errorf("failed to create GET request: %v", err)
+	}
+
+	req.Header.Set("Api-Key", c.ApiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	tflog.Trace(ctx, "Sending GET request", map[string]interface{}{
+		"url": url,
+	})
+	resp, err := c.HttpClient.Do(req)
+	if err != nil {
+		tflog.Error(ctx, "Failed to execute GET request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return nil, fmt.Errorf("failed to execute GET request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	tflog.Debug(ctx, "Received API response", map[string]interface{}{
+		"status_code": resp.StatusCode,
+	})
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		responseBody := string(bodyBytes)
+		tflog.Error(ctx, "API returned error", map[string]interface{}{
+			"status_code": resp.StatusCode,
+			"body":        responseBody,
+		})
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, responseBody)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var groups []string
+	if err := json.Unmarshal(bodyBytes, &groups); err != nil {
+		tflog.Error(ctx, "Failed to decode API response", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("failed to decode API response: %v", err)
+	}
+
+	tflog.Info(ctx, "User groups retrieved successfully", map[string]interface{}{
+		"count": len(groups),
+	})
+
+	return groups, nil
+}
+
+// CreateUserGroup cria um novo grupo de usuários
+func (c *Client) CreateUserGroup(ctx context.Context, name string) error {
+	tflog.Debug(ctx, "Creating user group", map[string]interface{}{
+		"name": name,
+	})
+
+	url := fmt.Sprintf("%s/users/groups", c.ApiUrl)
+
+	group := struct {
+		Name string `json:"name"`
+	}{
+		Name: name,
+	}
+
+	jsonData, err := json.Marshal(group)
+	if err != nil {
+		tflog.Error(ctx, "Failed to marshal group data", map[string]interface{}{
+			"error": err.Error(),
+			"name":  name,
+		})
+		return fmt.Errorf("failed to marshal group data: %v", err)
+	}
+
+	tflog.Trace(ctx, "Creating POST request", map[string]interface{}{
+		"url": url,
+	})
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		tflog.Error(ctx, "Failed to create POST request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return fmt.Errorf("failed to create POST request: %v", err)
+	}
+
+	req.Header.Set("Api-Key", c.ApiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	tflog.Trace(ctx, "Sending POST request", map[string]interface{}{
+		"url": url,
+	})
+	resp, err := c.HttpClient.Do(req)
+	if err != nil {
+		tflog.Error(ctx, "Failed to execute POST request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return fmt.Errorf("failed to execute POST request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	tflog.Debug(ctx, "Received API response for create", map[string]interface{}{
+		"status_code": resp.StatusCode,
+	})
+
+	if resp.StatusCode != 201 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		responseBody := string(bodyBytes)
+		tflog.Error(ctx, "API returned error for create", map[string]interface{}{
+			"status_code": resp.StatusCode,
+			"body":        responseBody,
+		})
+		return fmt.Errorf("API returned %d: %s", resp.StatusCode, responseBody)
+	}
+
+	tflog.Info(ctx, "User group created successfully", map[string]interface{}{
+		"name": name,
+	})
+
+	return nil
+}
+
+// DeleteUserGroup deleta um grupo de usuários
+func (c *Client) DeleteUserGroup(ctx context.Context, name string) error {
+	tflog.Debug(ctx, "Deleting user group", map[string]interface{}{
+		"name": name,
+	})
+
+	url := fmt.Sprintf("%s/users/groups/%s", c.ApiUrl, name)
+	tflog.Trace(ctx, "Creating DELETE request", map[string]interface{}{
+		"url": url,
+	})
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		tflog.Error(ctx, "Failed to create DELETE request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return fmt.Errorf("error creating delete request: %v", err)
+	}
+
+	req.Header.Set("Api-Key", c.ApiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	tflog.Trace(ctx, "Sending DELETE request", map[string]interface{}{
+		"url": url,
+	})
+	resp, err := c.HttpClient.Do(req)
+	if err != nil {
+		tflog.Error(ctx, "Failed to execute DELETE request", map[string]interface{}{
+			"error": err.Error(),
+			"url":   url,
+		})
+		return fmt.Errorf("error making delete request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	tflog.Debug(ctx, "Received API response for delete", map[string]interface{}{
+		"status_code": resp.StatusCode,
+	})
+
+	// API returns 204 on successful deletion
+	if resp.StatusCode == 204 {
+		tflog.Info(ctx, "User group deleted successfully", map[string]interface{}{
+			"name": name,
+		})
+		return nil
+	}
+
+	// Handle specific error cases
+	switch resp.StatusCode {
+	case 404:
+		tflog.Info(ctx, "User group not found for deletion", map[string]interface{}{
+			"name": name,
+		})
+		return nil // Consideramos isso um sucesso já que o objetivo é que o grupo não exista
+	case 422:
+		// Não podemos deletar o grupo admin, isso é esperado
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		responseBody := string(bodyBytes)
+		if strings.Contains(responseBody, "cannot delete admin group") {
+			tflog.Info(ctx, "Cannot delete admin group, skipping", map[string]interface{}{
+				"name": name,
+			})
+			return nil
+		}
+		tflog.Error(ctx, "API returned validation error for delete", map[string]interface{}{
+			"status_code": resp.StatusCode,
+			"body":        responseBody,
+		})
+		return fmt.Errorf("validation error: %s", responseBody)
+	default:
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		responseBody := string(bodyBytes)
+		tflog.Error(ctx, "API returned error for delete", map[string]interface{}{
+			"status_code": resp.StatusCode,
+			"body":        responseBody,
+		})
+		return fmt.Errorf("API returned %d: %s", resp.StatusCode, responseBody)
+	}
+}

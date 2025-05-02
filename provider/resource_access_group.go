@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hoophq/terraform-provider-hoop/client"
 	"github.com/hoophq/terraform-provider-hoop/models"
@@ -43,13 +44,52 @@ func resourceAccessGroup() *schema.Resource {
 }
 
 func resourceAccessGroupCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	// var diags diag.Diagnostics
 	ctx = tflog.SetField(ctx, "resource_type", "access_group")
+
+	// Get resource data
 	groupName := d.Get("group").(string)
 	ctx = tflog.SetField(ctx, "group_name", groupName)
 
 	tflog.Info(ctx, "Creating access group resource")
 	c := m.(*client.Client)
+
+	// Verificar se o grupo de usuários existe, se não, criar o grupo
+	existingGroups, err := c.GetUserGroups(ctx)
+	if err != nil {
+		tflog.Error(ctx, "Failed to get user groups", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return diag.FromErr(fmt.Errorf("error checking if user group exists: %v", err))
+	}
+
+	// Verificar se o grupo existe
+	groupExists := false
+	for _, group := range existingGroups {
+		if group == groupName {
+			groupExists = true
+			break
+		}
+	}
+
+	// Se o grupo não existe, criar
+	if !groupExists {
+		tflog.Info(ctx, "User group does not exist, creating it", map[string]interface{}{
+			"group_name": groupName,
+		})
+
+		err := c.CreateUserGroup(ctx, groupName)
+		if err != nil {
+			tflog.Error(ctx, "Failed to create user group", map[string]interface{}{
+				"error":      err.Error(),
+				"group_name": groupName,
+			})
+			return diag.FromErr(fmt.Errorf("error creating user group: %v", err))
+		}
+
+		tflog.Info(ctx, "User group created successfully")
+	} else {
+		tflog.Info(ctx, "User group already exists, skipping creation")
+	}
 
 	// Build the access group model
 	accessGroup := &models.AccessGroup{
@@ -64,16 +104,16 @@ func resourceAccessGroupCreate(ctx context.Context, d *schema.ResourceData, m in
 	})
 
 	// Create the access group
-	err := c.CreateAccessGroup(ctx, accessGroup)
+	err = c.CreateAccessGroup(ctx, accessGroup)
 	if err != nil {
 		tflog.Error(ctx, "Failed to create access group", map[string]interface{}{
 			"error": err.Error(),
 		})
-		return diag.FromErr(err)
+		return diag.FromErr(fmt.Errorf("error creating access group: %v", err))
 	}
 
 	tflog.Info(ctx, "Successfully created access group, setting ID in state")
-	d.SetId(accessGroup.Name)
+	d.SetId(groupName)
 
 	return resourceAccessGroupRead(ctx, d, m)
 }
@@ -168,22 +208,35 @@ func resourceAccessGroupDelete(ctx context.Context, d *schema.ResourceData, m in
 	var diags diag.Diagnostics
 	ctx = tflog.SetField(ctx, "resource_type", "access_group")
 
-	// Get access group name from ID
 	groupName := d.Id()
 	ctx = tflog.SetField(ctx, "group_name", groupName)
 
 	tflog.Info(ctx, "Deleting access group resource")
 	c := m.(*client.Client)
 
-	// Delete access group
+	// Delete the access group from the plugin
 	if err := c.DeleteAccessGroup(ctx, groupName); err != nil {
-		tflog.Error(ctx, "Failed to delete access group", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return diag.FromErr(fmt.Errorf("error deleting access group %s: %v", groupName, err))
+		// If not found, consider it deleted
+		if strings.Contains(err.Error(), "not found") {
+			tflog.Debug(ctx, "Access group not found, considering delete successful", map[string]interface{}{
+				"group_name": groupName,
+			})
+		} else {
+			tflog.Error(ctx, "Failed to delete access group", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return diag.FromErr(fmt.Errorf("error deleting access group: %v", err))
+		}
 	}
 
-	tflog.Info(ctx, "Access group deleted successfully")
+	// Agora, depois de remover o grupo do plugin, deletar o grupo de usuários
+	if err := c.DeleteUserGroup(ctx, groupName); err != nil {
+		tflog.Error(ctx, "Failed to delete user group", map[string]interface{}{
+			"error":      err.Error(),
+			"group_name": groupName,
+		})
+		return diag.FromErr(fmt.Errorf("error deleting user group: %v", err))
+	}
 
 	// Clear the ID from state
 	d.SetId("")
