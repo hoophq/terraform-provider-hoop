@@ -171,7 +171,7 @@ func CommonConnectionSchema(isResource bool) map[string]*schema.Schema {
 			Computed: !isResource,
 			Default:  getSchemaWithDefault(isResource, ""),
 		},
-		"connection_tags": {
+		"tags": {
 			Type:     schema.TypeMap,
 			Optional: isResource,
 			Computed: !isResource,

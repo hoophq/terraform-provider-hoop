@@ -28,7 +28,10 @@ resource "hoop_connection" "postgres_example" {
     sslmode  = "prefer"
   }
 
-  tags = ["production", "database"]
+  tags = {
+    environment = "production"
+    type        = "database"
+  }
 }
 ```
 
@@ -52,7 +55,10 @@ resource "hoop_connection" "mysql_secure" {
   redact_types = ["EMAIL_ADDRESS", "CREDIT_CARD_NUMBER"]
   review_groups = ["dba-team"]
   
-  tags = ["production", "secure"]
+  tags = {
+    environment = "production"
+    security    = "high"
+  }
 }
 ```
 
@@ -94,7 +100,9 @@ The following arguments are supported:
 * `review_groups` - (Optional) List of groups that can review connection access. Default: []
 * `guardrails` - (Optional) List of guardrail IDs. Default: []
 * `jira_template_id` - (Optional) ID of the Jira template for access requests. Default: ""
-* `tags` - (Optional) List of tags to categorize the connection. Default: []
+* `tags` - (Optional) Key-value map of tags to categorize the connection. Each tag consists of a key and a value string. Default: {}
+
+-> **Note:** Prior versions of this provider used `connection_tags` instead of `tags`. The field has been renamed for consistency in the 2.0 version, but the functionality remains the same.
 
 ## Attribute Reference
 

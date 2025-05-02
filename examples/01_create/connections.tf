@@ -15,7 +15,7 @@ resource "hoop_connection" "basic_postgres" {
     sslmode = "prefer"
   }
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     team        = "engineering"
   }
@@ -43,7 +43,7 @@ resource "hoop_connection" "masked_postgres" {
     "PHONE_NUMBER"
   ]
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     sensitivity = "high"
     type        = "masked"
@@ -67,7 +67,7 @@ resource "hoop_connection" "review_postgres" {
 
   review_groups = ["dba-team", "security-team"]
 
-  connection_tags = {
+  tags = {
     environment = "prod"
     compliance  = "required"
   }
@@ -93,7 +93,7 @@ resource "hoop_connection" "secure_postgres" {
     "f8c68e05-7e2c-43b7-9038-cac70a469fa0"
   ]
 
-  connection_tags = {
+  tags = {
     environment = "prod"
     security    = "high"
   }
@@ -115,7 +115,7 @@ resource "hoop_connection" "basic_mysql" {
     db   = "standard_db"
   }
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     database    = "mysql"
   }
@@ -141,7 +141,7 @@ resource "hoop_connection" "replica_mysql" {
     native  = false # Disable direct connection to replica
   }
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     database    = "mysql"
     type        = "replica"
@@ -170,7 +170,7 @@ resource "hoop_connection" "secure_mysql" {
     "f8c68e05-7e2c-43b7-9038-cac70a469fa0"
   ]
 
-  connection_tags = {
+  tags = {
     environment = "prod"
     database    = "mysql"
     security    = "high"
@@ -193,7 +193,7 @@ resource "hoop_connection" "basic_oracle" {
     sid  = var.database_hosts.oracle.sid
   }
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     database    = "oracle"
   }
@@ -220,7 +220,7 @@ resource "hoop_connection" "enterprise_oracle" {
   ]
   review_groups = ["oracle-dba"]
 
-  connection_tags = {
+  tags = {
     environment = "prod"
     database    = "oracle"
     type        = "enterprise"
@@ -239,7 +239,7 @@ resource "hoop_connection" "basic_mongodb" {
     connection_string = var.database_hosts.mongodb.connection_string
   }
 
-  connection_tags = {
+  tags = {
     environment = "dev"
     database    = "mongodb"
   }
@@ -257,7 +257,7 @@ resource "hoop_connection" "secure_mongodb" {
 
   review_groups = ["mongodb-dba"]
 
-  connection_tags = {
+  tags = {
     environment = "prod"
     database    = "mongodb"
     type        = "replica"

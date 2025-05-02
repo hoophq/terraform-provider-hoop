@@ -122,7 +122,7 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 		RedactTypes:    getListWithDefault(d, "redact_types"),
 		Reviewers:      getListWithDefault(d, "review_groups"),
 		GuardrailRules: getListWithDefault(d, "guardrails"),
-		ConnectionTags: getConnectionTagsFromResourceData(d),
+		Tags:           getConnectionTagsFromResourceData(d),
 	}
 
 	if v, ok := d.GetOk("jira_template_id"); ok {
@@ -298,8 +298,8 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 		})
 		return diag.FromErr(err)
 	}
-	if err := d.Set("connection_tags", connection.ConnectionTags); err != nil {
-		tflog.Error(ctx, "Error setting connection_tags", map[string]interface{}{
+	if err := d.Set("tags", connection.Tags); err != nil {
+		tflog.Error(ctx, "Error setting tags", map[string]interface{}{
 			"error": err.Error(),
 		})
 		return diag.FromErr(err)
@@ -346,7 +346,7 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		Reviewers:           existingConnection.Reviewers,
 		GuardrailRules:      existingConnection.GuardrailRules,
 		JiraIssueTemplateID: existingConnection.JiraIssueTemplateID,
-		ConnectionTags:      existingConnection.ConnectionTags,
+		Tags:                existingConnection.Tags,
 	}
 
 	// Step 3: Update fields that have changed
@@ -474,9 +474,9 @@ func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m int
 		changedFields = append(changedFields, "jira_template_id")
 	}
 
-	if d.HasChange("connection_tags") {
-		connection.ConnectionTags = getConnectionTagsFromResourceData(d)
-		changedFields = append(changedFields, "connection_tags")
+	if d.HasChange("tags") {
+		connection.Tags = getConnectionTagsFromResourceData(d)
+		changedFields = append(changedFields, "tags")
 	}
 
 	tflog.Info(ctx, "Updating connection with changed fields", map[string]interface{}{
@@ -635,7 +635,7 @@ func getListWithDefault(d *schema.ResourceData, key string) []string {
 }
 
 func getConnectionTagsFromResourceData(d *schema.ResourceData) map[string]string {
-	if v, ok := d.GetOk("connection_tags"); ok {
+	if v, ok := d.GetOk("tags"); ok {
 		result := make(map[string]string)
 		for key, value := range v.(map[string]interface{}) {
 			result[key] = value.(string)
