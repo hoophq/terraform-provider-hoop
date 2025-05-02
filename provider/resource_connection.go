@@ -503,7 +503,7 @@ func resourceConnectionDelete(ctx context.Context, d *schema.ResourceData, m int
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
 
 	// Get connection name from ID
-	connectionName := d.Id()
+	connectionName := d.Get("name").(string)
 	ctx = tflog.SetField(ctx, "connection_name", connectionName)
 
 	tflog.Info(ctx, "Deleting connection resource")
