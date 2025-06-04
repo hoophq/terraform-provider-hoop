@@ -29,7 +29,9 @@ func Provider() *schema.Provider {
 			"hoop_runbooks_path": resourceRunbooksPath(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"hoop_connection": dataSourceConnection(),
+			"hoop_connection":    dataSourceConnection(),
+			"hoop_access_group":  dataSourceAccessGroup(),
+			"hoop_runbooks_path": dataSourceRunbooksPath(),
 		},
 	}
 

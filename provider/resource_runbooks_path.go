@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hoophq/terraform-provider-hoop/client"
@@ -42,6 +43,12 @@ func resourceRunbooksPath() *schema.Resource {
 				Optional: true,
 				Computed: true,
 			},
+			"connection_dependency": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Internal field for tracking connection dependency",
+			},
 		},
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
@@ -60,6 +67,8 @@ func resourceRunbooksPathCreate(ctx context.Context, d *schema.ResourceData, m i
 
 	tflog.Info(ctx, "Creating runbooks path resource")
 	c := m.(*client.Client)
+
+	setConnectionDependency(d, connectionID, connectionName)
 
 	// Get current runbooks plugin
 	plugin, err := c.GetPlugin(ctx, "runbooks")
@@ -244,6 +253,10 @@ func resourceRunbooksPathUpdate(ctx context.Context, d *schema.ResourceData, m i
 	tflog.Info(ctx, "Updating runbooks path resource")
 	c := m.(*client.Client)
 
+	if d.HasChange("connection_id") || d.HasChange("connection_name") {
+		setConnectionDependency(d, connectionID, connectionName)
+	}
+
 	// Get current runbooks plugin
 	plugin, err := c.GetPlugin(ctx, "runbooks")
 	if err != nil {
@@ -357,4 +370,29 @@ func resourceRunbooksPathDelete(ctx context.Context, d *schema.ResourceData, m i
 	tflog.Info(ctx, "Successfully deleted runbooks path resource")
 
 	return diags
+}
+
+func setConnectionDependency(d *schema.ResourceData, connectionID, connectionName string) {
+	if isConnectionReference(connectionID) {
+		d.Set("connection_dependency", connectionID)
+	} else if isConnectionReference(connectionName) {
+		d.Set("connection_dependency", connectionName)
+	}
+}
+
+func isConnectionReference(value string) bool {
+	return (value != "" &&
+		(containsSubstrings(value, []string{".", "hoop_connection"}) ||
+			containsSubstrings(value, []string{"${", "}", "."}) ||
+			containsSubstrings(value, []string{"var.", "."}) ||
+			containsSubstrings(value, []string{"local.", "."})))
+}
+
+func containsSubstrings(s string, subs []string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }

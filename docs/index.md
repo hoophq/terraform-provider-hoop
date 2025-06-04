@@ -15,8 +15,8 @@ The Hoop provider is used to interact with resources supported by [Hoop.dev](htt
 terraform {
   required_providers {
     hoop = {
-      source = "hoophq/hoop"
-      version = "~> 0.0.1"
+      source  = "hoophq/hoop"
+      version = "~> 1.0.0"
     }
   }
 }
@@ -35,7 +35,7 @@ The provider needs to be configured with proper credentials before it can be use
 
 ```bash
 export HOOP_API_KEY="your-api-key"
-export HOOP_API_URL="http://localhost:8009/api"
+export HOOP_API_URL="https://your-hoop-instance.com/api"
 ```
 
 ### Provider Configuration
@@ -43,7 +43,7 @@ export HOOP_API_URL="http://localhost:8009/api"
 ```hcl
 provider "hoop" {
   api_key = "your-api-key"
-  api_url = "http://localhost:8009/api"
+  api_url = "https://your-hoop-instance.com/api"
 }
 ```
 

@@ -39,6 +39,13 @@ func resourceAccessGroup() *schema.Resource {
 					Type: schema.TypeString,
 				},
 			},
+			// Campo computado para rastrear dependências implícitas
+			"connection_dependencies": {
+				Type:        schema.TypeMap,
+				Optional:    true,
+				Computed:    true,
+				Description: "Internal field for tracking dependencies",
+			},
 		},
 	}
 }
@@ -91,11 +98,27 @@ func resourceAccessGroupCreate(ctx context.Context, d *schema.ResourceData, m in
 		tflog.Info(ctx, "User group already exists, skipping creation")
 	}
 
+	// Obter as conexões e checar por possíveis referências
+	connections := expandStringList(d.Get("connections").([]interface{}))
+
+	// Detectar referências do Terraform nestes valores para dependências implícitas
+	connectionDeps := detectConnectionReferences(connections)
+
+	// Armazenar as dependências detectadas no estado
+	if len(connectionDeps) > 0 {
+		if err := d.Set("connection_dependencies", connectionDeps); err != nil {
+			tflog.Warn(ctx, "Failed to set connection dependencies", map[string]interface{}{
+				"error": err.Error(),
+			})
+			// Continue mesmo com erro, pois isso é apenas otimização
+		}
+	}
+
 	// Build the access group model
 	accessGroup := &models.AccessGroup{
 		Name:        groupName,
 		Description: d.Get("description").(string),
-		Connections: expandStringList(d.Get("connections").([]interface{})),
+		Connections: connections,
 	}
 
 	tflog.Debug(ctx, "Prepared access group model", map[string]interface{}{
@@ -158,6 +181,9 @@ func resourceAccessGroupRead(ctx context.Context, d *schema.ResourceData, m inte
 		return diag.FromErr(err)
 	}
 
+	// Preservar as dependências detectadas durante a criação/atualização
+	// Não alterar o campo connection_dependencies aqui
+
 	tflog.Info(ctx, "Successfully read access group resource")
 	return diags
 }
@@ -168,6 +194,24 @@ func resourceAccessGroupUpdate(ctx context.Context, d *schema.ResourceData, m in
 
 	tflog.Info(ctx, "Updating access group resource")
 	c := m.(*client.Client)
+
+	// Se as conexões mudaram, verificar por novas dependências implícitas
+	if d.HasChange("connections") {
+		connections := expandStringList(d.Get("connections").([]interface{}))
+
+		// Detectar referências do Terraform nestes valores
+		connectionDeps := detectConnectionReferences(connections)
+
+		// Atualizar as dependências no estado
+		if len(connectionDeps) > 0 {
+			if err := d.Set("connection_dependencies", connectionDeps); err != nil {
+				tflog.Warn(ctx, "Failed to update connection dependencies", map[string]interface{}{
+					"error": err.Error(),
+				})
+				// Continue mesmo com erro, pois isso é apenas otimização
+			}
+		}
+	}
 
 	// Build the access group model
 	accessGroup := &models.AccessGroup{
@@ -254,4 +298,26 @@ func expandStringList(list []interface{}) []string {
 		}
 	}
 	return vs
+}
+
+// detectConnectionReferences analisa uma lista de strings e detecta possíveis referências a recursos do Terraform
+// Retorna um mapa que pode ser usado para criar dependências implícitas
+func detectConnectionReferences(connections []string) map[string]interface{} {
+	// Mapa para armazenar dependências detectadas
+	deps := make(map[string]interface{})
+
+	// Padrões comuns para detectar referências de recursos no Terraform
+	// Por exemplo: "${hoop_connection.example.id}" ou "${hoop_connection.example.name}"
+	for _, conn := range connections {
+		// Verificar se a string parece ser uma referência do Terraform
+		if strings.Contains(conn, ".") &&
+			(strings.Contains(conn, "hoop_connection") ||
+				strings.Contains(conn, "${") ||
+				strings.Contains(conn, "}")) {
+			// Armazenar a referência para criar dependência implícita
+			deps[conn] = true
+		}
+	}
+
+	return deps
 }

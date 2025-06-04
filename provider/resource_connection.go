@@ -162,12 +162,12 @@ func resourceConnectionCreate(ctx context.Context, d *schema.ResourceData, m int
 func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
-	ctx = tflog.SetField(ctx, "connection_name", d.Id())
+	ctx = tflog.SetField(ctx, "connection_name", d.Get("name").(string))
 
 	tflog.Info(ctx, "Reading connection resource")
 	c := m.(*client.Client)
 
-	connection, err := c.GetConnection(ctx, d.Id())
+	connection, err := c.GetConnection(ctx, d.Get("name").(string))
 	if err != nil {
 		tflog.Error(ctx, "Failed to get connection from API", map[string]interface{}{
 			"error": err.Error(),
@@ -176,6 +176,15 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 	}
 
 	tflog.Debug(ctx, "Setting connection attributes in state")
+
+	d.SetId(connection.ID)
+
+	if err := d.Set("name", connection.Name); err != nil {
+		tflog.Error(ctx, "Error setting name", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return diag.FromErr(err)
+	}
 
 	// Set all attributes in state
 	if err := d.Set("type", connection.Type); err != nil {
@@ -332,14 +341,14 @@ func resourceConnectionRead(ctx context.Context, d *schema.ResourceData, m inter
 
 func resourceConnectionUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	ctx = tflog.SetField(ctx, "resource_type", "connection")
-	ctx = tflog.SetField(ctx, "connection_name", d.Id())
+	ctx = tflog.SetField(ctx, "connection_name", d.Get("name").(string))
 
 	tflog.Info(ctx, "Updating connection resource")
 	c := m.(*client.Client)
 
 	// Step 1: Get current connection
 	tflog.Debug(ctx, "Retrieving current connection state")
-	existingConnection, err := c.GetConnection(ctx, d.Id())
+	existingConnection, err := c.GetConnection(ctx, d.Get("name").(string))
 	if err != nil {
 		tflog.Error(ctx, "Failed to get existing connection", map[string]interface{}{
 			"error": err.Error(),

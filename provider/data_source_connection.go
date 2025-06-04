@@ -45,8 +45,21 @@ func dataSourceConnectionRead(ctx context.Context, d *schema.ResourceData, m int
 		return diag.FromErr(err)
 	}
 
-	// Set the ID to the connection name
-	d.SetId(connectionName)
+	d.SetId(connection.ID)
+
+	if err := d.Set("id", connection.ID); err != nil {
+		tflog.Error(ctx, "Error setting id", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return diag.FromErr(err)
+	}
+
+	if err := d.Set("name", connection.Name); err != nil {
+		tflog.Error(ctx, "Error setting name", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return diag.FromErr(err)
+	}
 
 	// Set all attributes in state
 	if err := d.Set("type", connection.Type); err != nil {

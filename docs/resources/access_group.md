@@ -14,13 +14,27 @@ Provides a Hoop access group resource. This allows you to create, update, and de
 ### Basic Access Control Group
 
 ```hcl
+resource "hoop_connection" "postgres_dev" {
+  name     = "postgres-dev"
+  subtype  = "postgres"
+  # ... other connection attributes
+}
+
+resource "hoop_connection" "mysql_dev" {
+  name     = "mysql-dev"
+  subtype  = "mysql"
+  # ... other connection attributes
+}
+
 resource "hoop_access_group" "developers" {
   group       = "developers"
   description = "Access group for development team"
   connections = [
-    "postgres-dev",
-    "mysql-dev"
+    hoop_connection.postgres_dev.name,
+    hoop_connection.mysql_dev.name
   ]
+  
+  # References to connection resources create implicit dependencies
 }
 ```
 
@@ -31,9 +45,27 @@ resource "hoop_access_group" "database_admins" {
   group       = "database_admins"
   description = "Access group for database administrators"
   connections = [
-    "postgres-prod",
+    "postgres-prod",  # Using string literals for existing connections
     "mysql-prod",
     "mongo-prod"
+  ]
+}
+```
+
+### Using Data Sources for Existing Connections
+
+When you want to manage access groups for existing connections (not managed by Terraform), you can use the `hoop_connection` data source:
+
+```hcl
+data "hoop_connection" "existing_pg" {
+  name = "existing-postgres"
+}
+
+resource "hoop_access_group" "analytics_team" {
+  group       = "analytics_team"
+  description = "Access group for the analytics team"
+  connections = [
+    data.hoop_connection.existing_pg.name
   ]
 }
 ```
@@ -91,11 +123,14 @@ The access_control plugin in Hoop may process updates asynchronously. When creat
 
 To prevent this issue, always use Terraform's `depends_on` attribute to ensure a clear creation order when multiple access groups need to be assigned to the same connections.
 
-## Attributes Reference
+## Attribute Reference
 
 In addition to all arguments above, the following attributes are exported:
 
 * `id` - The ID of the access group (same as group name)
+* `group` - The name of the access group (same as input)
+* `description` - The description of the access group
+* `connections` - The list of connection names that this group can access
 
 ## Import
 
