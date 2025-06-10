@@ -51,7 +51,7 @@ func (r *pluginConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 		Description: "Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: `slack`, `webhooks`, `runbooks`, `access_control`.",
 		Attributes: map[string]schema.Attribute{
 			"plugin_name": schema.StringAttribute{
-				Description: "The name of the plugin that this configuration refers to.",
+				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks`, `access_control`.",
 				Required:    true,
 				Validators:  PluginNameValidator,
 			},
