@@ -15,7 +15,7 @@ provider "hoop" {
 resource "hoop_connection" "bash-console" {
   name     = "bash-console"
   type     = "custom"
-  subtype  = ""
+  # subtype  = ""
   agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
 
   command = [

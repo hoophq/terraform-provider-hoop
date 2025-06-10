@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type HttpClient interface {
@@ -23,17 +24,15 @@ func NewClient(apiURL, token string, httpClient HttpClient) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	apiURL = strings.TrimSuffix(apiURL, "/")
 	return &Client{apiURL: apiURL, token: token, httpClient: httpClient}
 }
 
 func validateErr(resp *http.Response) error {
-	if resp.StatusCode >= 400 {
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed reading response body, status=%v, reason=%v",
-				resp.StatusCode, err)
-		}
-		return fmt.Errorf("status=%v, payload=%v", resp.StatusCode, string(data))
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed reading response body, status=%v, reason=%v",
+			resp.StatusCode, err)
 	}
-	return nil
+	return fmt.Errorf("status=%v, payload=%v", resp.StatusCode, string(data))
 }

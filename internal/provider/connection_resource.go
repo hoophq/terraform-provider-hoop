@@ -81,7 +81,7 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Required:    true,
 			},
 			"type": schema.StringAttribute{
-				Description: "The type of the connection resource",
+				Description: "The type of the connection resource. Valid values are 'database', 'application', or 'custom'.",
 				Required:    true,
 				Validators:  ConnectionTypeValidator,
 			},
@@ -91,7 +91,7 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Validators:  NonEmptyStringValidator,
 			},
 			"command": schema.ListAttribute{
-				Description: "The command entrypoint that will be executed for one off executions.",
+				Description: "The command entrypoint that will be executed for one off executions. Each command argument should be a separate entry in the list.",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators:  NonEmptyListValidator,
@@ -104,7 +104,7 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Sensitive:   true,
 			},
 			"reviewers": schema.ListAttribute{
-				Description: "A list of reviewer groups for the connection.",
+				Description: "A list of approver groups that are allowed to approve a session.",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators:  NonEmptyListValidator,
@@ -122,22 +122,22 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Validators:  NonEmptyMapValidator,
 			},
 			"access_mode_runbooks": schema.StringAttribute{
-				Description: "Enables or disables access to runbooks for the connection.",
+				Description: "Enables or disables access to runbooks for the connection. Accept values are 'enabled' or 'disabled'.",
 				Required:    true,
 				Validators:  AccessModeValidator,
 			},
 			"access_mode_exec": schema.StringAttribute{
-				Description: "Enables or disables access to execute one off commands for the connection.",
+				Description: "Enables or disables access to execute one off commands for the connection. Accept values are 'enabled' or 'disabled'.",
 				Required:    true,
 				Validators:  AccessModeValidator,
 			},
 			"access_mode_connect": schema.StringAttribute{
-				Description: "Enables or disables access native access when interacting with the connection.",
+				Description: "Enables or disables access native access when interacting with the connection. Accept values are 'enabled' or 'disabled'.",
 				Required:    true,
 				Validators:  AccessModeValidator,
 			},
 			"access_schema": schema.StringAttribute{
-				Description: "Enables or disables displaying the instrospection schema tree of database type connections.",
+				Description: "Enables or disables displaying the introspection schema tree of database type connections.",
 				Required:    true,
 				Validators:  AccessModeValidator,
 			},
@@ -210,8 +210,6 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		)
 		return
 	}
-
-	// tflog.Info(ctx, "Creating connection resource", map[string]any{"obj-raw": *requestConnection})
 
 	connection, err := r.client.CreateConnection(requestConnection)
 	if err != nil {
