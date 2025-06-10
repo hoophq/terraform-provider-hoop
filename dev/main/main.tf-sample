@@ -1,0 +1,65 @@
+terraform {
+  required_providers {
+    hoop = {
+      source  = "local/hoop"
+    }
+  }
+  # required_version = ">= 1.1.0"
+}
+
+provider "hoop" {
+  api_key = "<org-id>|<random-key>"
+  api_url = "http://localhost:8009/api"
+}
+
+resource "hoop_connection" "bash-console" {
+  name     = "bash-console"
+  type     = "custom"
+  subtype  = ""
+  agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
+
+  command = [
+    "bash",
+  ]
+
+  secrets = {
+    "envvar:MYENV" = "value"
+    "filesystem:MYFILE" = "content of my file"
+  }
+
+  reviewers = [
+    "admin",
+  ]
+
+  redact_types = [
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER"
+  ]
+
+  access_mode_runbooks = "enabled"
+  access_mode_exec = "enabled"
+  access_mode_connect = "enabled"
+  access_schema = "enabled"
+
+  # guardrail_rules = []
+  # jira_issue_template_id = ""
+
+
+  tags = {
+    environment = "development"
+    type        = "custom"
+    purpose     = "demo"
+  }
+}
+
+resource "hoop_plugin_connection" "slack" {
+  plugin_name = "slack"
+  connection_id = hoop_connection.bash-console.id
+  config = ["CHANNEL-ID", "CHANNEL-ID-2"]
+}
+
+resource "hoop_plugin_connection" "webhooks" {
+  plugin_name = "webhooks"
+  connection_id = hoop_connection.bash-console.id
+  config = []
+}

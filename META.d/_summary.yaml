@@ -1,0 +1,10 @@
+---
+schema: 1.1
+
+partition: tf-ecosystem
+
+summary:
+  owner: team-hoopdevtf
+  description: |
+    Hoop.dev Terraform provider using terraform-plugin-framework
+  visibility: public

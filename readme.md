@@ -1,172 +1,87 @@
-# Terraform Provider for Hoop.dev
+# Terraform Provider Hoop
 
-This provider allows you to manage Hoop.dev resources through Terraform. Currently, it supports managing database connections with various configurations and security settings.
+This provider leverages the hoop API to manage resources in the Hoop platform.
+It's a Terraform provider that allows you to create, read, update, and delete resources in Hoop.
 
-## Requirements
+## Supported Resources
 
-- [Terraform](https://www.terraform.io/downloads.html) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.19 (for building the provider)
-- [Hoop.dev](https://hoop.dev) account and API credentials
+- [x] Connections
+- [x] Plugin Connection
 
-## Installation
+## Documentation
 
-```hcl
-terraform {
-  required_providers {
-    hoop = {
-      source = "registry.terraform.io/local/hoop"
-      version = "1.0.0"
-    }
-  }
-}
+Refer to [./docs](./docs) or the [Hoop Terraform Provider Documentation](https://registry.terraform.io/providers/hoophq/hoop/latest/docs) for detailed documentation on how to use the provider, including examples and configuration options.
 
-provider "hoop" {
-  # See how to get your API key at: https://hoop.dev/docs/learn/api-key-usage
-  api_key = var.hoop_api_key
-  api_url = "http://localhost:8009/api"  # Your Hoop.dev API URL
-}
+## Development
+
+This provider is built using the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework).
+It was scaffolded using the [Terraform Provider Scaffolding](https://github.com/hashicorp/terraform-provider-scaffolding-framework) template repository.
+
+### Requirements
+
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
+- [Go](https://golang.org/doc/install) >= 1.23
+
+### Testing the Provider
+
+To test the provider, you can run the following command:
+
+```shell
+make test
 ```
 
-## Usage Examples
+1. To work with a live Hoop instance, spin up a local instance of the Hoop API server:
 
-### Basic Database Connection
+- Use the development server in the [hoophq/hoop repository](https://github.com/hoophq/hoop/blob/main/DEV.md).
+- Use the [docker-compose setup](https://hoop.dev/docs/setup/deployment/docker-compose)
 
-```hcl
-resource "hoop_connection" "simple_postgres" {
-  name    = "user-service-db"
-  subtype = "postgres"
-  agent_id = "your-agent-id"
+2. Obtain the organization id to [setup your API KEY](https://hoop.dev/docs/setup/apis/api-key).
+3. Restart your development server with the API KEY set
+4. Open a new terminal and use the script `./scripts/terraform` to run the provider with the local Hoop API server.
 
-  secrets = {
-    host     = "localhost"
-    port     = "5432"
-    user     = "postgres"
-    pass     = "your-password"
-    db       = "users"
-    sslmode  = "verify-full"  # Optional
-  }
-
-  tags = ["production", "user-service"]
-}
+```sh
+mv ./dev/main/main.tf-sample ./dev/main/main.tf
+./scripts/terraform plan -chdir=dev/main plan
 ```
 
-### Multiple Databases Using for_each
+> *The script will use the `$HOME/go/bin` folder by default to install the provider binary.*
 
-```hcl
-locals {
-  databases = {
-    "users" = {
-      subtype = "postgres"
-      host    = "users-db.internal"
-      db      = "users"
-      tags    = ["prod", "core"]
-    }
-    "payments" = {
-      subtype = "mysql"
-      host    = "payments-db.internal"
-      db      = "payments"
-      tags    = ["prod", "financial"]
-    }
-  }
-}
+It will build and install the provider, and then run the `plan` command against the local Hoop API server.
+If you need to clean the state, remove the local files in this folder:
 
-resource "hoop_connection" "service_databases" {
-  for_each = local.databases
-
-  name    = "${each.key}-db"
-  subtype = each.value.subtype
-  agent_id = var.agent_id
-
-  secrets = {
-    host = each.value.host
-    port = "5432"
-    user = var.db_user
-    pass = var.db_password
-    db   = each.value.db
-  }
-
-  tags = each.value.tags
-}
+```sh
+rm -rf ./dev/main/terraform.tfstate*
 ```
 
-### Using With Modules
+To clean up resources from the local Hoop API server, the command line could be used to manage the resources directly.
 
-```hcl
-# modules/database/main.tf
-variable "environment" {}
-variable "service_name" {}
-variable "database_config" {}
-
-resource "hoop_connection" "database" {
-  name    = "${var.service_name}-${var.environment}"
-  subtype = var.database_config.type
-  agent_id = var.agent_id
-
-  secrets = var.database_config.secrets
-
-  tags = concat(
-    var.database_config.tags,
-    [var.environment, var.service_name]
-  )
-}
-
-# main.tf
-module "user_service_db" {
-  source = "./modules/database"
-
-  environment  = "production"
-  service_name = "user-service"
-  
-  database_config = {
-    type = "postgres"
-    secrets = {
-      host = "user-db.prod.internal"
-      port = "5432"
-      user = var.db_user
-      pass = var.db_password
-      db   = "users"
-    }
-    tags = ["core"]
-  }
-}
+```sh
+hoop admin delete conn bash-console
 ```
 
-## Resource: hoop_connection
+### Updating Documentation
 
-### Required Arguments
+This project uses the `tfplugindocs` tool to generate documentation for the provider.
+The `tfplugindocs` tool will automatically include schema-based descriptions, if present in a data source, provider, or resource's schema. The `schema.Schema` type's `Description` field describes the data source, provider, or resource itself. Each attribute's or block's Description field describes that particular attribute or block. These descriptions should be tailored to practitioner usage and include any caveats or value expectations, such as special syntax.
 
-- `name` - (Required) The name of the connection. Must be unique and follow the pattern: `^[a-zA-Z0-9_]+(?:[-\.]?[a-zA-Z0-9_]+){2,253}$`
-- `subtype` - (Required) The database type. Valid values: "postgres", "mysql", "mongodb", "mssql", "oracledb"
-- `agent_id` - (Required) The ID of the agent that will manage this connection
-- `secrets` - (Required) Connection credentials. Required fields vary by database type:
-  - PostgreSQL: host, port, user, pass, db (optional: sslmode)
-  - MySQL: host, port, user, pass, db
-  - MongoDB: connection_string
-  - MSSQL: host, port, user, pass, db (optional: insecure)
-  - OracleDB: host, port, user, pass, sid
+To generate the documentation, you can run the following command:
 
-### Optional Arguments
+```sh
+make generate
+```
 
-- `access_mode` - (Optional) Configuration for different types of access
-  - `runbook` - (Optional) Enable runbook access. Default: true
-  - `web` - (Optional) Enable web access. Default: true
-  - `native` - (Optional) Enable native access. Default: true
-- `access_schema` - (Optional) Enable schema access. Default: true
-- `datamasking` - (Optional) Enable data masking. Default: false
-- `redact_types` - (Optional) List of info types to redact. Default: []
-- `review_groups` - (Optional) List of groups that can review connection access. Default: []
-- `guardrails` - (Optional) List of guardrail ids. Default: []
-- `jira_template_id` - (Optional) ID of the Jira template for access requests. Default: ""
-- `tags` - (Optional) List of tags to categorize the connection. Default: []
+#### Example File Documentation
 
-## Contributing
+The `tfplugindocs` tool will automatically include Terraform configuration examples from files with the following naming conventions:
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+- **Provider:** `examples/provider/provider.tf`
+- **Resources:** `examples/resources/TYPE/resource.tf`
+- **Data Sources:** `examples/data-sources/TYPE/data-source.tf`
+- **Functions:** `examples/functions/TYPE/function.tf`
 
-## License
+Replace `TYPE` with the name of the resource, data source, or function. For example: `examples/resources/hoop_connection/resource.tf`.
 
-MIT
+#### Example Import Documentation
+
+The `tfplugindocs` tool automatically will include Terraform import examples for resources with the file naming convention `examples/resources/TYPE/import.sh`.
+
