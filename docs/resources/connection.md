@@ -13,25 +13,34 @@ Manage a connection resource in Hoop Platform.
 ## Example Usage
 
 ```terraform
+# Copyright (c) HashiCorp, Inc.
+
 resource "hoop_connection" "bash" {
-  name     = "bash-console"
-  type     = "custom"
-  subtype  = ""
+  name = "bash-console"
+  type = "custom"
+  # subtype  = ""
   agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
 
+  # command contains the main entrypoint command that will be executed
+  # each entry is an argument to the command
   command = [
     "bash",
+    "--verbose"
   ]
 
   secrets = {
-    "envvar:MYENV"      = "value"
+    # expose as environment variable where $MYSECRET will contain the secret value
+    "envvar:MYENV" = "value"
+    # expose as environment variable where $MYFILE will contain the path to the file content
     "filesystem:MYFILE" = "file-content"
   }
 
+  # user groups that are allowed to approve sessions for this connection
   reviewers = [
     "admin",
   ]
 
+  # the entity types that are used to redact sensitive information
   redact_types = [
     "EMAIL_ADDRESS",
     "PHONE_NUMBER"
@@ -44,7 +53,6 @@ resource "hoop_connection" "bash" {
 
   # guardrail_rules = []
   # jira_issue_template_id = ""
-
 
   tags = {
     environment = "development"
@@ -59,21 +67,21 @@ resource "hoop_connection" "bash" {
 
 ### Required
 
-- `access_mode_connect` (String) Enables or disables access native access when interacting with the connection.
-- `access_mode_exec` (String) Enables or disables access to execute one off commands for the connection.
-- `access_mode_runbooks` (String) Enables or disables access to runbooks for the connection.
-- `access_schema` (String) Enables or disables displaying the instrospection schema tree of database type connections.
+- `access_mode_connect` (String) Enables or disables access native access when interacting with the connection. Accept values are 'enabled' or 'disabled'.
+- `access_mode_exec` (String) Enables or disables access to execute one off commands for the connection. Accept values are 'enabled' or 'disabled'.
+- `access_mode_runbooks` (String) Enables or disables access to runbooks for the connection. Accept values are 'enabled' or 'disabled'.
+- `access_schema` (String) Enables or disables displaying the introspection schema tree of database type connections.
 - `agent_id` (String) The ID of the agent associated with the connection.
 - `name` (String) The name of the connection resource.
-- `type` (String) The type of the connection resource
+- `type` (String) The type of the connection resource. Valid values are 'database', 'application', or 'custom'.
 
 ### Optional
 
-- `command` (List of String) The command entrypoint that will be executed for one off executions.
+- `command` (List of String) The command entrypoint that will be executed for one off executions. Each command argument should be a separate entry in the list.
 - `guardrail_rules` (List of String) A list of guardrail rule ids to be applied to the connection.
 - `jira_issue_template_id` (String) The ID of the Jira issue template to be used for the connection.
 - `redact_types` (List of String) A list of redact types, these values are dependent of which DLP provider is being used.
-- `reviewers` (List of String) A list of reviewer groups for the connection.
+- `reviewers` (List of String) A list of approver groups that are allowed to approve a session.
 - `secrets` (Map of String, Sensitive) A map of secrets to be used by the connection.
 - `subtype` (String) The subtype of the connection resource.
 - `tags` (Map of String) A map of tags to be associated with the connection.
@@ -87,6 +95,8 @@ resource "hoop_connection" "bash" {
 Import is supported using the following syntax:
 
 ```shell
+# Copyright (c) HashiCorp, Inc.
+
 # connection could be imported by using the name of the connection
 terraform import hoop_connection.bash bash-console
 ```
