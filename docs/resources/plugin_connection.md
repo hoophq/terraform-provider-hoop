@@ -13,10 +13,34 @@ Plugin Connection resources allows enabling features specific features to connec
 ## Example Usage
 
 ```terraform
+# Copyright (c) HashiCorp, Inc.
+
+# manage which user groups can access this connection
 resource "hoop_plugin_connection" "access_control" {
   plugin_name   = "access_control"
   connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
   config        = ["devops", "sre"]
+}
+
+# manage Slack configuration and which channel to send messages to
+resource "hoop_plugin_connection" "slack" {
+  plugin_name   = "slack"
+  connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
+  config        = ["C082KCG5NJU"]
+}
+
+# manage runbooks configuration and which folder to display
+resource "hoop_plugin_connection" "runbooks" {
+  plugin_name   = "runbooks"
+  connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
+  config        = ["ops/"]
+}
+
+# when webhooks are configured, sends events when interacting with this connection
+resource "hoop_plugin_connection" "webhooks" {
+  plugin_name   = "webhooks"
+  connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
+  config        = []
 }
 ```
 
@@ -27,13 +51,15 @@ resource "hoop_plugin_connection" "access_control" {
 
 - `config` (List of String) A list of configuration values for the plugin connection. The values depend on the plugin type.
 - `connection_id` (String) The unique identifier of the connection.
-- `plugin_name` (String) The name of the plugin that this configuration refers to.
+- `plugin_name` (String) The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks`, `access_control`.
 
 ## Import
 
 Import is supported using the following syntax:
 
 ```shell
+# Copyright (c) HashiCorp, Inc.
+
 # plugin connections could be imported using the <plugin_name>/<connection_id> format
 terraform import hoop_plugin_connection.access_control access_control/5001a4a4-9cba-4f2a-9147-d763cd070e0a
 ```

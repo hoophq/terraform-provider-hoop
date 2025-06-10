@@ -1,6 +1,8 @@
+# Copyright (c) HashiCorp, Inc.
+
 resource "hoop_connection" "bash" {
-  name     = "bash-console"
-  type     = "custom"
+  name = "bash-console"
+  type = "custom"
   # subtype  = ""
   agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
 
@@ -13,7 +15,7 @@ resource "hoop_connection" "bash" {
 
   secrets = {
     # expose as environment variable where $MYSECRET will contain the secret value
-    "envvar:MYENV"      = "value"
+    "envvar:MYENV" = "value"
     # expose as environment variable where $MYFILE will contain the path to the file content
     "filesystem:MYFILE" = "file-content"
   }

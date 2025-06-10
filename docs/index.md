@@ -13,6 +13,8 @@ The Hoop provider allows managing resources from a Hoop Gateway instance API.
 ## Example Usage
 
 ```terraform
+# Copyright (c) HashiCorp, Inc.
+
 # Configuration-based authentication
 provider "hoop" {
   api_key = "<orgid>|<random-key>"
@@ -25,8 +27,5 @@ provider "hoop" {
 
 ### Required
 
-- `api_url` (String) The API URL of the Hoop Gateway instance. It may also be provided via HOOP_APIURL environment variable.
-
-### Optional
-
-- `api_key` (String, Sensitive) The API Key to authenticate in the Hoop Gateway. May also be provided via HOOP_APIKEY environment variable.
+- `api_key` (String, Sensitive) The API Key to authenticate in the Hoop Gateway. May also be provided via `HOOP_APIKEY` environment variable.
+- `api_url` (String) The API URL of the Hoop Gateway instance. It may also be provided via `HOOP_APIURL` environment variable.

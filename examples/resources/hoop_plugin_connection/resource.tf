@@ -1,3 +1,5 @@
+# Copyright (c) HashiCorp, Inc.
+
 # manage which user groups can access this connection
 resource "hoop_plugin_connection" "access_control" {
   plugin_name   = "access_control"
