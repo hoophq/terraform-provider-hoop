@@ -12,6 +12,9 @@ lint:
 generate:
 	cd tools; go generate ./...
 
+publish:
+	./scripts/publish-release.sh
+
 fmt:
 	gofmt -s -w -e .
 
