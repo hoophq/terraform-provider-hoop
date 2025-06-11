@@ -31,7 +31,8 @@ resource "hoop_connection" "bash" {
   secrets = {
     # expose as environment variable where $MYSECRET will contain the secret value
     "envvar:MYENV" = "value"
-    # expose as environment variable where $MYFILE will contain the path to the file content
+    # expose as environment variable where $MYFILE will contain
+    # the path to the file content
     "filesystem:MYFILE" = "file-content"
   }
 
@@ -67,13 +68,13 @@ resource "hoop_connection" "bash" {
 
 ### Required
 
-- `access_mode_connect` (String) Enables or disables access native access when interacting with the connection. Accept values are 'enabled' or 'disabled'.
-- `access_mode_exec` (String) Enables or disables access to execute one off commands for the connection. Accept values are 'enabled' or 'disabled'.
-- `access_mode_runbooks` (String) Enables or disables access to runbooks for the connection. Accept values are 'enabled' or 'disabled'.
-- `access_schema` (String) Enables or disables displaying the introspection schema tree of database type connections.
+- `access_mode_connect` (String) Enables or disables access native access when interacting with the connection. Accept values are `enabled` or `disabled`.
+- `access_mode_exec` (String) Enables or disables access to execute one off commands for the connection. Accept values are `enabled` or `disabled`.
+- `access_mode_runbooks` (String) Enables or disables access to runbooks for the connection. Accept values are `enabled` or `disabled`.
+- `access_schema` (String) Enables or disables displaying the introspection schema tree of database type connections. Accept values are `enabled` or `disabled`
 - `agent_id` (String) The ID of the agent associated with the connection.
 - `name` (String) The name of the connection resource.
-- `type` (String) The type of the connection resource. Valid values are 'database', 'application', or 'custom'.
+- `type` (String) The type of the connection resource. Valid values are `database`, `application`, or `custom`.
 
 ### Optional
 
@@ -82,7 +83,7 @@ resource "hoop_connection" "bash" {
 - `jira_issue_template_id` (String) The ID of the Jira issue template to be used for the connection.
 - `redact_types` (List of String) A list of redact types, these values are dependent of which DLP provider is being used.
 - `reviewers` (List of String) A list of approver groups that are allowed to approve a session.
-- `secrets` (Map of String, Sensitive) A map of secrets to be used by the connection.
+- `secrets` (Map of String, Sensitive) A map of secrets to be used by the connection. The key must have the prefix `envvar:KEY_NAME` or `filesystem:KEY_NAME`. These prefixes indicate how the secret will be used on runtime.
 - `subtype` (String) The subtype of the connection resource.
 - `tags` (Map of String) A map of tags to be associated with the connection.
 
@@ -97,6 +98,5 @@ Import is supported using the following syntax:
 ```shell
 # Copyright (c) HashiCorp, Inc.
 
-# connection could be imported by using the name of the connection
 terraform import hoop_connection.bash bash-console
 ```
