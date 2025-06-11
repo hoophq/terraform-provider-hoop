@@ -16,7 +16,8 @@ resource "hoop_connection" "bash" {
   secrets = {
     # expose as environment variable where $MYSECRET will contain the secret value
     "envvar:MYENV" = "value"
-    # expose as environment variable where $MYFILE will contain the path to the file content
+    # expose as environment variable where $MYFILE will contain
+    # the path to the file content
     "filesystem:MYFILE" = "file-content"
   }
 

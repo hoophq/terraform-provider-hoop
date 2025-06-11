@@ -36,7 +36,7 @@ resource "hoop_plugin_connection" "runbooks" {
   config        = ["ops/"]
 }
 
-# when webhooks are configured, sends events when interacting with this connection
+# it will send events when interacting with this connection
 resource "hoop_plugin_connection" "webhooks" {
   plugin_name   = "webhooks"
   connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
@@ -60,6 +60,5 @@ Import is supported using the following syntax:
 ```shell
 # Copyright (c) HashiCorp, Inc.
 
-# plugin connections could be imported using the <plugin_name>/<connection_id> format
 terraform import hoop_plugin_connection.access_control access_control/5001a4a4-9cba-4f2a-9147-d763cd070e0a
 ```
