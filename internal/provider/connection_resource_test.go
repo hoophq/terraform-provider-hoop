@@ -165,6 +165,13 @@ resource "hoop_connection" "bash" {
 					resource.TestCheckResourceAttrSet("hoop_connection.bash", "id"),
 				),
 			},
+			{
+				ResourceName:                         "hoop_connection.bash",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateId:                        "bash",
+			},
 		},
 	})
 }

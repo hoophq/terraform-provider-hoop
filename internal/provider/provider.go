@@ -163,6 +163,9 @@ func (p *hoopProvider) DataSources(_ context.Context) []func() datasource.DataSo
 func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewConnectionResource,
-		NewPluginpluginConnectionResource,
+		NewPluginConnectionResource,
+		NewPluginConfigResource,
+		NewDatamaskingRulesResource,
+		NewUserResource,
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
@@ -22,8 +24,8 @@ var (
 	_ resource.ResourceWithImportState = &pluginConnectionResource{}
 )
 
-// NewPluginpluginConnectionResource is a helper function to simplify the provider implementation.
-func NewPluginpluginConnectionResource() resource.Resource {
+// NewPluginConnectionResource is a helper function to simplify the provider implementation.
+func NewPluginConnectionResource() resource.Resource {
 	return &pluginConnectionResource{}
 }
 
@@ -53,6 +55,9 @@ func (r *pluginConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks`, `access_control`.",
 				Required:    true,
 				Validators:  PluginNameValidator,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"connection_id": schema.StringAttribute{
 				Description: "The unique identifier of the connection.",
