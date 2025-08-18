@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -35,6 +36,18 @@ var PluginNameValidator = []validator.String{
 	stringvalidator.OneOf("slack", "webhooks", "runbooks", "access_control"),
 }
 
+var PluginConfigNameValidator = []validator.String{
+	stringvalidator.OneOf("slack", "runbooks"),
+}
+
 var NonEmptyStringValidator = []validator.String{
 	stringvalidator.LengthAtLeast(1),
+}
+
+var ScoreThresholdValidator = []validator.Float64{
+	float64validator.Between(0.0, 1.0),
+}
+
+var UserStatusValidator = []validator.String{
+	stringvalidator.OneOf("active", "inactive"),
 }

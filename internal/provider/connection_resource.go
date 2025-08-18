@@ -74,6 +74,9 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"name": schema.StringAttribute{
 				Description: "The name of the connection resource.",
 				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"agent_id": schema.StringAttribute{
 				Description: "The ID of the agent associated with the connection.",
@@ -109,10 +112,11 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Validators:  NonEmptyListValidator,
 			},
 			"redact_types": schema.ListAttribute{
-				Description: "A list of redact types, these values are dependent of which DLP provider is being used.",
-				Optional:    true,
-				ElementType: types.StringType,
-				Validators:  NonEmptyListValidator,
+				Description:        "A list of redact types, these values are dependent of which DLP provider is being used.",
+				Optional:           true,
+				ElementType:        types.StringType,
+				Validators:         NonEmptyListValidator,
+				DeprecationMessage: "Redact types are deprecated and will be removed in a future version. Use the `hoop_datamasking_rules` resource instead.",
 			},
 			"tags": schema.MapAttribute{
 				Description: "A map of tags to be associated with the connection.",
@@ -328,55 +332,74 @@ func toConnectionResourceModel(ctx context.Context, state connectionResourceMode
 	state.AccessModeConnect = types.StringValue(obj.AccessModeConnect)
 	state.AccessSchema = types.StringValue(obj.AccessSchema)
 
-	// we must check the state for null values before assigning when there are optional attributes
-	if !state.Command.IsNull() {
-		state.Command, diags = types.ListValueFrom(ctx, types.StringType, obj.Command)
-		if diags.HasError() {
-			return nil, diags
-		}
+	state.Command, diags = types.ListValueFrom(ctx, types.StringType, obj.Command)
+	if diags.HasError() {
+		return nil, diags
 	}
 
-	if !state.Reviewers.IsNull() {
-		state.Reviewers, diags = types.ListValueFrom(ctx, types.StringType, obj.Reviewers)
-		if diags.HasError() {
-			return nil, diags
-		}
+	// coerce the optional field to a ListNull if it is empty
+	if len(state.Command.Elements()) == 0 {
+		state.Command = types.ListNull(types.StringType)
 	}
 
-	if !state.GuardRailRules.IsNull() {
-		state.GuardRailRules, diags = types.ListValueFrom(ctx, types.StringType, obj.GuardRailRules)
-		if diags.HasError() {
-			return nil, diags
-		}
+	state.Reviewers, diags = types.ListValueFrom(ctx, types.StringType, obj.Reviewers)
+	if diags.HasError() {
+		return nil, diags
 	}
 
-	if !state.RedactTypes.IsNull() {
-		state.RedactTypes, diags = types.ListValueFrom(ctx, types.StringType, obj.RedactTypes)
-		if diags.HasError() {
-			return nil, diags
-		}
+	// coerce the optional field to a ListNull if it is empty
+	if len(state.Reviewers.Elements()) == 0 {
+		state.Reviewers = types.ListNull(types.StringType)
 	}
 
-	if !state.Secrets.IsNull() {
-		state.Secrets, diags = types.MapValueFrom(ctx, types.StringType, obj.Secrets)
-		if diags.HasError() {
-			return nil, diags
-		}
+	state.GuardRailRules, diags = types.ListValueFrom(ctx, types.StringType, obj.GuardRailRules)
+	if diags.HasError() {
+		return nil, diags
 	}
 
-	if !state.Tags.IsNull() {
-		state.Tags, diags = types.MapValueFrom(ctx, types.StringType, obj.ConnectionTags)
-		if diags.HasError() {
-			return nil, diags
-		}
+	// coerce the optional field to a ListNull if it is empty
+	if len(state.GuardRailRules.Elements()) == 0 {
+		state.GuardRailRules = types.ListNull(types.StringType)
 	}
 
-	if !state.Subtype.IsNull() {
-		state.Subtype = types.StringValue(obj.SubType)
+	state.RedactTypes, diags = types.ListValueFrom(ctx, types.StringType, obj.RedactTypes)
+	if diags.HasError() {
+		return nil, diags
 	}
 
-	if !state.JiraIssueTemplateID.IsNull() {
-		state.JiraIssueTemplateID = types.StringValue(obj.JiraIssueTemplateID)
+	// coerce the optional field to a ListNull if it is empty
+	if len(state.RedactTypes.Elements()) == 0 {
+		state.RedactTypes = types.ListNull(types.StringType)
+	}
+
+	state.Secrets, diags = types.MapValueFrom(ctx, types.StringType, obj.Secrets)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	// coerce the optional field to a ListNull if it is empty
+	if len(state.Secrets.Elements()) == 0 {
+		state.Secrets = types.MapNull(types.StringType)
+	}
+
+	state.Tags, diags = types.MapValueFrom(ctx, types.StringType, obj.ConnectionTags)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	// coerce the optional field to a MapNull if it is empty
+	if len(state.Tags.Elements()) == 0 {
+		state.Tags = types.MapNull(types.StringType)
+	}
+
+	state.Subtype = types.StringValue(obj.SubType)
+	if state.Subtype.ValueString() == "" {
+		state.Subtype = types.StringNull()
+	}
+
+	state.JiraIssueTemplateID = types.StringValue(obj.JiraIssueTemplateID)
+	if state.JiraIssueTemplateID.ValueString() == "" {
+		state.JiraIssueTemplateID = types.StringNull()
 	}
 
 	return &state, nil

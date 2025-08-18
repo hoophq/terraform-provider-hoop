@@ -7,6 +7,9 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 
 - [x] Connections
 - [x] Plugin Connection
+- [x] Plugin Configuration
+- [x] Data Masking Rules
+- [x] User & Groups Configuration
 
 ## Documentation
 
@@ -41,7 +44,7 @@ make test
 
 ```sh
 mv ./dev/main/main.tf-sample ./dev/main/main.tf
-./scripts/terraform plan -chdir=dev/main plan
+./scripts/terraform -chdir=dev/main plan
 ```
 
 > *The script will use the `$HOME/go/bin` folder by default to install the provider binary.*
