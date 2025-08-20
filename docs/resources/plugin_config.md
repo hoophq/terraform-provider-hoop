@@ -3,12 +3,12 @@
 page_title: "hoop_plugin_config Resource - hoop"
 subcategory: ""
 description: |-
-  Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: slack, and runbooks.
+  Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: slack, and runbooks. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 ---
 
 # hoop_plugin_config (Resource)
 
-Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks`.
+Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks`. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 
 ## Example Usage
 

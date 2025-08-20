@@ -61,11 +61,11 @@ func (p *hoopProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
 				Description: "The API URL of the Hoop Gateway instance. It may also be provided via `HOOP_APIURL` environment variable.",
-				Required:    true,
+				Optional:    true,
 			},
 			"api_key": schema.StringAttribute{
 				Description: "The API Key to authenticate in the Hoop Gateway. May also be provided via `HOOP_APIKEY` environment variable.",
-				Required:    true,
+				Optional:    true,
 				Sensitive:   true,
 			},
 		},
