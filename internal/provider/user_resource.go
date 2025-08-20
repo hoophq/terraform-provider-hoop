@@ -49,7 +49,7 @@ func (r *userResource) Metadata(_ context.Context, req resource.MetadataRequest,
 // Schema defines the schema for the data source.
 func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider.",
+		Description: "Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",
