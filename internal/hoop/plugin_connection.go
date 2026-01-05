@@ -62,7 +62,7 @@ func (c *Client) UpsertPluginConnection(pluginName, connectionID string, config 
 	if resp.StatusCode == http.StatusOK {
 		var resource PluginConnection
 		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("failed decoding connection resource, reason=%v", err)
+			return nil, fmt.Errorf("failed decoding plugin connection resource, reason=%v", err)
 		}
 		if resource.Config == nil {
 			resource.Config = []string{}

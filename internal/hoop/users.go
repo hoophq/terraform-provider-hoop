@@ -82,7 +82,7 @@ func (c *Client) UpdateUser(userEmail, status string, groups []string) (*User, e
 	user.Status = status
 	user.Groups = groups
 
-	apiURL := fmt.Sprintf("%s/users/%s", c.apiURL, userEmail)
+	apiURL := fmt.Sprintf("%s/users/%s", c.apiURL, user.ID)
 	body, err := json.Marshal(user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal user, reason=%v", err)

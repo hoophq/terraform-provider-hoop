@@ -10,6 +10,7 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 - [x] Plugin Configuration
 - [x] Data Masking Rules
 - [x] User & Groups Configuration
+- [x] Runboos Configurations & Rules
 
 ## Documentation
 

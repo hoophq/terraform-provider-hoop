@@ -49,10 +49,10 @@ func (r *pluginConnectionResource) Metadata(_ context.Context, req resource.Meta
 // Schema defines the schema for the data source.
 func (r *pluginConnectionResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: `slack`, `webhooks`, `runbooks`, `access_control`.",
+		Description: "Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: `slack`, `webhooks`, `runbooks` (DEPRECATED), `access_control`.",
 		Attributes: map[string]schema.Attribute{
 			"plugin_name": schema.StringAttribute{
-				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks`, `access_control`.",
+				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks` (DEPRECATED), `access_control`.",
 				Required:    true,
 				Validators:  PluginNameValidator,
 				PlanModifiers: []planmodifier.String{

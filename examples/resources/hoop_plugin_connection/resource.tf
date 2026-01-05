@@ -15,6 +15,7 @@ resource "hoop_plugin_connection" "slack" {
 }
 
 # manage runbooks configuration and which folder to display
+# DEPRECATED in favor of hoop_runbook_rules resource
 resource "hoop_plugin_connection" "runbooks" {
   plugin_name   = "runbooks"
   connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"

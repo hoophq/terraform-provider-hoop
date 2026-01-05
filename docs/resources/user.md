@@ -3,12 +3,12 @@
 page_title: "hoop_user Resource - hoop"
 subcategory: ""
 description: |-
-  Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider. Make sure to work with this resource only with the gateway version 1.39.1 and onwards
+  Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 ---
 
 # hoop_user (Resource)
 
-Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider. Make sure to work with this resource only with the gateway version 1.39.1 and onwards
+Manage user and group resources. Do not use this terraform resource when managing groups via Identity Provider. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 
 ## Example Usage
 
