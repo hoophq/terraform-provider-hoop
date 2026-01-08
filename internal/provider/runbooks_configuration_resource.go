@@ -52,7 +52,7 @@ func (r *runbookConfigurationResource) Metadata(_ context.Context, req resource.
 // Schema defines the schema for the data source.
 func (r *runbookConfigurationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages Runbook Configuration resources. Make sure to work with this resource only with the gateway version 1.46.14 and onwards",
+		Description: "Manages Runbook Configuration resources. Make sure to work with this resource only with the gateway version 1.47.0 and onwards",
 		Attributes: map[string]schema.Attribute{
 			"repository": schema.StringAttribute{
 				Description: "The normalized name of the repository. E.g.: 'github.com/hoophq/runbooks'",

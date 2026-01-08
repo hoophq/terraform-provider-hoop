@@ -3,12 +3,12 @@
 page_title: "hoop_runbook_rule Resource - hoop"
 subcategory: ""
 description: |-
-  Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.46.14 and onwards
+  Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.47.0 and onwards
 ---
 
 # hoop_runbook_rule (Resource)
 
-Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.46.14 and onwards
+Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.47.0 and onwards
 
 ## Example Usage
 
