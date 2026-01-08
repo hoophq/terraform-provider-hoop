@@ -26,11 +26,11 @@ resource "hoop_runbook_configuration" "hoop-public-runbooks" {
 
 # Runbooks configuration. SSH Private Keys
 resource "hoop_runbook_configuration" "hoop-public-runbooks" {
-  git_url         = "https://github.com/your-org/your-repo"
+  git_url         = "git@github.com:your-org/your-repo.git"
   git_hook_ttl    = 0
   git_user        = ""
   git_password    = ""
-  ssh_user        = "git@github.com:your-org/your-repo.git"
+  ssh_user        = ""
   ssh_key         = file("${path.module}/ssh_key.pem")
   ssh_keypass     = "your-ssh-key-passphrase"
   ssh_known_hosts = file("${path.module}/known_hosts")

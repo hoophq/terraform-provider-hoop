@@ -5,7 +5,7 @@ subcategory: ""
 
 Version 0.0.19 introduces integration with new endpoints for defining multiple repository Runbook Configurations and rules. This allows you to specify which user groups and connections can interact with a given runbook. This guide outlines the key updates and how to adapt your configurations accordingly.
 
-Hoop Gateway version 1.46.0 introduces breaking changes that remove support for managing `hoop_plugin_connection` and `hoop_plugin_config` for the **runbooks plugin**.
+Hoop Gateway version 1.46+ introduces breaking changes that remove support for managing `hoop_plugin_connection` and `hoop_plugin_config` for the **runbooks plugin**.
 
 ## Resource: `hoop_plugin_connection`
 

@@ -51,7 +51,7 @@ func (r *runbookRulesResource) Metadata(_ context.Context, req resource.Metadata
 // Schema defines the schema for the data source.
 func (r *runbookRulesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.46.14 and onwards",
+		Description: "Manages Runbook Rules resources. It allows defining which connections and groups could interact with runbooks. Make sure to work with this resource only with the gateway version 1.47.0 and onwards",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the connection resource.",
