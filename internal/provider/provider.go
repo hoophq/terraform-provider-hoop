@@ -166,6 +166,8 @@ func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewPluginConnectionResource,
 		NewPluginConfigResource,
 		NewDatamaskingRulesResource,
+		NewRunbookConfigurationResource,
+		NewRunbookRulesResource,
 		NewUserResource,
 	}
 }

@@ -10,6 +10,7 @@ resource "hoop_plugin_config" "slack" {
 }
 
 # Runbooks plugin configuration. Public Repositories
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {
@@ -18,6 +19,7 @@ resource "hoop_plugin_config" "runbooks" {
 }
 
 # Runbooks plugin configuration. Basic Credentials
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {
@@ -28,6 +30,7 @@ resource "hoop_plugin_config" "runbooks" {
 }
 
 # Runbooks plugin configuration. SSH Private Keys
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {

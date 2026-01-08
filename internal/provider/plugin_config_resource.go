@@ -47,7 +47,7 @@ func (r *pluginConfigResource) Metadata(_ context.Context, req resource.Metadata
 // Schema defines the schema for the data source.
 func (r *pluginConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks`. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.",
+		Description: "Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks` (DEPRECATED). Make sure to work with this resource only with the gateway version 1.39.1 and onwards.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",
@@ -57,7 +57,7 @@ func (r *pluginConfigResource) Schema(_ context.Context, _ resource.SchemaReques
 				},
 			},
 			"plugin_name": schema.StringAttribute{
-				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, and `runbooks`.",
+				Description: "The name of the plugin that this configuration refers to. Accepted values are: `slack`, and `runbooks` (DEPRECATED).",
 				Required:    true,
 				Validators:  PluginConfigNameValidator,
 				PlanModifiers: []planmodifier.String{

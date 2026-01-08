@@ -3,12 +3,12 @@
 page_title: "hoop_plugin_config Resource - hoop"
 subcategory: ""
 description: |-
-  Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: slack, and runbooks. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
+  Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: slack, and runbooks (DEPRECATED). Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 ---
 
 # hoop_plugin_config (Resource)
 
-Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks`. Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
+Plugin Config resources allows configuring plugin definitions. The supported plugins that accept configurations are: `slack`, and `runbooks` (DEPRECATED). Make sure to work with this resource only with the gateway version 1.39.1 and onwards.
 
 ## Example Usage
 
@@ -25,6 +25,7 @@ resource "hoop_plugin_config" "slack" {
 }
 
 # Runbooks plugin configuration. Public Repositories
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {
@@ -33,6 +34,7 @@ resource "hoop_plugin_config" "runbooks" {
 }
 
 # Runbooks plugin configuration. Basic Credentials
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {
@@ -43,6 +45,7 @@ resource "hoop_plugin_config" "runbooks" {
 }
 
 # Runbooks plugin configuration. SSH Private Keys
+# DEPRECATED in favor of hoop_runbook_configuration resource
 resource "hoop_plugin_config" "runbooks" {
   plugin_name = "runbooks"
   config = {
@@ -61,7 +64,7 @@ resource "hoop_plugin_config" "runbooks" {
 ### Required
 
 - `config` (Map of String, Sensitive) A map of generic configuration required for this plugin.
-- `plugin_name` (String) The name of the plugin that this configuration refers to. Accepted values are: `slack`, and `runbooks`.
+- `plugin_name` (String) The name of the plugin that this configuration refers to. Accepted values are: `slack`, and `runbooks` (DEPRECATED).
 
 ### Read-Only
 

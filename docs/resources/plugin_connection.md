@@ -3,12 +3,12 @@
 page_title: "hoop_plugin_connection Resource - hoop"
 subcategory: ""
 description: |-
-  Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: slack, webhooks, runbooks, access_control.
+  Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: slack, webhooks, runbooks (DEPRECATED), access_control.
 ---
 
 # hoop_plugin_connection (Resource)
 
-Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: `slack`, `webhooks`, `runbooks`, `access_control`.
+Plugin Connection resources allows enabling features specific features to connection which are called plugins. The supported plugins are: `slack`, `webhooks`, `runbooks` (DEPRECATED), `access_control`.
 
 ## Example Usage
 
@@ -30,6 +30,7 @@ resource "hoop_plugin_connection" "slack" {
 }
 
 # manage runbooks configuration and which folder to display
+# DEPRECATED in favor of hoop_runbook_rules resource
 resource "hoop_plugin_connection" "runbooks" {
   plugin_name   = "runbooks"
   connection_id = "5001a4a4-9cba-4f2a-9147-d763cd070e0a"
@@ -51,7 +52,7 @@ resource "hoop_plugin_connection" "webhooks" {
 
 - `config` (List of String) A list of configuration values for the plugin connection. The values depend on the plugin type.
 - `connection_id` (String) The unique identifier of the connection.
-- `plugin_name` (String) The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks`, `access_control`.
+- `plugin_name` (String) The name of the plugin that this configuration refers to. Accepted values are: `slack`, `webhooks`, `runbooks` (DEPRECATED), `access_control`.
 
 ## Import
 

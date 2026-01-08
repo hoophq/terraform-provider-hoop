@@ -3,6 +3,7 @@ module github.com/hoophq/terraform-provider-hoop
 go 1.23.7
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-uuid v1.0.3
 	github.com/hashicorp/terraform-plugin-framework v1.15.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.18.0

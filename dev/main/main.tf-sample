@@ -12,43 +12,45 @@ provider "hoop" {
   api_url = "http://localhost:8009/api"
 }
 
-resource "hoop_connection" "bash-console" {
-  name     = "bash-console"
-  type     = "custom"
-  # subtype  = ""
+resource "hoop_connection" "postgres-demo" {
+  name     = "postgres-demo"
+  type     = "database"
+  subtype  = "postgres"
   agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
 
-  command = [
-    "bash",
-  ]
-
   secrets = {
-    "envvar:MYENV" = "value"
-    "filesystem:MYFILE" = "content of my file"
+    "envvar:HOST"     = "demo-pg-public-dns-url"
+    "envvar:PORT"     = "5432"
+    "envvar:USER"     = "pguser-demo"
+    "envvar:PASS"     = "pg-pw-demo"
+    "envvar:DB"       = "dellstore"
+    "envvar:SSLMODE"  = "prefer"
   }
 
-  reviewers = [
-    "admin",
-  ]
-
-  redact_types = [
-    "EMAIL_ADDRESS",
-    "PHONE_NUMBER"
+  command = [
+    "psql",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-A",
+    "-F\t",
+    "-P",
+    "pager=off",
+    "-h",
+    "$HOST",
+    "-U",
+    "$USER",
+    "--port=$PORT",
+    "$DB",
   ]
 
   access_mode_runbooks = "enabled"
-  access_mode_exec = "enabled"
-  access_mode_connect = "enabled"
-  access_schema = "enabled"
-
-  # guardrail_rules = []
-  # jira_issue_template_id = ""
-
+  access_mode_exec     = "enabled"
+  access_mode_connect  = "enabled"
+  access_schema        = "enabled"
 
   tags = {
     environment = "development"
-    type        = "custom"
-    purpose     = "demo"
+    type        = "database"
   }
 }
 
@@ -63,3 +65,36 @@ resource "hoop_plugin_connection" "webhooks" {
   connection_id = hoop_connection.bash-console.id
   config = []
 }
+
+resource "hoop_runbook_configuration" "hoop-public-runbooks" {
+  git_url         = "https://github.com/hoophq/runbooks.git"
+  git_hook_ttl    = 0
+  git_user        = ""
+  git_password    = ""
+  ssh_user        = ""
+  ssh_key         = ""
+  ssh_keypass     = ""
+  ssh_known_hosts = ""
+}
+
+resource "hoop_runbook_rule" "pg_dev" {
+  name        = "Example Runbook Rule"
+  description = "An example runbook rule"
+  connections = [hoop_connection.postgres-demo.name]
+  user_groups = ["developers"]
+  runbooks = [
+    { 
+      repository = hoop_runbook_configuration.hoop-public-runbooks.repository
+      name       = "postgres-demo/update-customer-email.runbook.sql"
+    },
+    { 
+      repository = hoop_runbook_configuration.hoop-public-runbooks.repository
+      name       = "postgres-demo/delete-customer-by-id.runbook.sql"
+    },
+    { 
+      repository = hoop_runbook_configuration.hoop-public-runbooks.repository
+      name       = "postgres-demo/fetch-customer-by-id.runbook.sql"
+    }
+  ]
+}
+

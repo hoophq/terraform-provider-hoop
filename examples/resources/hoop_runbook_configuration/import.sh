@@ -1,0 +1,1 @@
+terraform import hoop_runbook_configuration.myrepo https://github.com/hoophq/runbooks.git
