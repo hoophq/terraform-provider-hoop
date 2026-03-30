@@ -109,11 +109,19 @@ func (c *Client) doRunbookRequestWithBody(id string, repo RunbookRepo) (*Runbook
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-		var resource RunbookRepo
+		var resource RunbookConfig
 		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("failed decoding runbook repository resource, reason=%v", err)
+			return nil, fmt.Errorf("failed decoding runbook configuration response, reason=%v", err)
 		}
-		return &resource, nil
+		for _, r := range resource.Repositories {
+			if r.GitURL == repo.GitURL {
+				return &r, nil
+			}
+		}
+		if len(resource.Repositories) > 0 {
+			return &resource.Repositories[0], nil
+		}
+		return nil, fmt.Errorf("runbook repository %q not found in response", repo.GitURL)
 	}
 	return nil, validateErr(resp)
 }

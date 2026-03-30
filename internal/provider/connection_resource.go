@@ -31,22 +31,27 @@ func NewConnectionResource() resource.Resource {
 
 // connectionResourceModel maps the data source schema data.
 type connectionResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	Name                types.String `tfsdk:"name"`
-	AgentID             types.String `tfsdk:"agent_id"`
-	Type                types.String `tfsdk:"type"`
-	Subtype             types.String `tfsdk:"subtype"`
-	Command             types.List   `tfsdk:"command"`
-	Secrets             types.Map    `tfsdk:"secrets"`
-	Reviewers           types.List   `tfsdk:"reviewers"`
-	RedactTypes         types.List   `tfsdk:"redact_types"`
-	Tags                types.Map    `tfsdk:"tags"`
-	AccessModeRunbooks  types.String `tfsdk:"access_mode_runbooks"`
-	AccessModeExec      types.String `tfsdk:"access_mode_exec"`
-	AccessModeConnect   types.String `tfsdk:"access_mode_connect"`
-	AccessSchema        types.String `tfsdk:"access_schema"`
-	GuardRailRules      types.List   `tfsdk:"guardrail_rules"`
-	JiraIssueTemplateID types.String `tfsdk:"jira_issue_template_id"`
+	ID                      types.String `tfsdk:"id"`
+	Name                    types.String `tfsdk:"name"`
+	AgentID                 types.String `tfsdk:"agent_id"`
+	Type                    types.String `tfsdk:"type"`
+	Subtype                 types.String `tfsdk:"subtype"`
+	Command                 types.List   `tfsdk:"command"`
+	Secrets                 types.Map    `tfsdk:"secrets"`
+	Reviewers               types.List   `tfsdk:"reviewers"`
+	RedactTypes             types.List   `tfsdk:"redact_types"`
+	Tags                    types.Map    `tfsdk:"tags"`
+	AccessModeRunbooks      types.String `tfsdk:"access_mode_runbooks"`
+	AccessModeExec          types.String `tfsdk:"access_mode_exec"`
+	AccessModeConnect       types.String `tfsdk:"access_mode_connect"`
+	AccessSchema            types.String `tfsdk:"access_schema"`
+	GuardRailRules          types.List   `tfsdk:"guardrail_rules"`
+	JiraIssueTemplateID     types.String `tfsdk:"jira_issue_template_id"`
+	AccessMaxDuration       types.Int64  `tfsdk:"access_max_duration"`
+	ForceApproveGroups      types.List   `tfsdk:"force_approve_groups"`
+	MandatoryMetadataFields types.List   `tfsdk:"mandatory_metadata_fields"`
+	MinReviewApprovals      types.Int64  `tfsdk:"min_review_approvals"`
+	ResourceName            types.String `tfsdk:"resource_name"`
 }
 
 // connectionResource is the data source implementation.
@@ -153,6 +158,31 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"jira_issue_template_id": schema.StringAttribute{
 				Description: "The ID of the Jira issue template to be used for the connection.",
+				Optional:    true,
+				Validators:  NonEmptyStringValidator,
+			},
+			"access_max_duration": schema.Int64Attribute{
+				Description: "Maximum duration in seconds for JIT access sessions on this connection.",
+				Optional:    true,
+			},
+			"force_approve_groups": schema.ListAttribute{
+				Description: "Groups that can force approve reviews for this connection.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators:  NonEmptyListValidator,
+			},
+			"mandatory_metadata_fields": schema.ListAttribute{
+				Description: "Fields that must be present in the metadata for every session on this connection.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators:  NonEmptyListValidator,
+			},
+			"min_review_approvals": schema.Int64Attribute{
+				Description: "Minimum number of review approvals required to execute this connection.",
+				Optional:    true,
+			},
+			"resource_name": schema.StringAttribute{
+				Description: "Resource to which this connection belongs to. It will be created if it doesn't exist.",
 				Optional:    true,
 				Validators:  NonEmptyStringValidator,
 			},
@@ -402,6 +432,39 @@ func toConnectionResourceModel(ctx context.Context, state connectionResourceMode
 		state.JiraIssueTemplateID = types.StringNull()
 	}
 
+	if obj.AccessMaxDuration != nil {
+		state.AccessMaxDuration = types.Int64Value(int64(*obj.AccessMaxDuration))
+	} else {
+		state.AccessMaxDuration = types.Int64Null()
+	}
+
+	state.ForceApproveGroups, diags = types.ListValueFrom(ctx, types.StringType, obj.ForceApproveGroups)
+	if diags.HasError() {
+		return nil, diags
+	}
+	if len(state.ForceApproveGroups.Elements()) == 0 {
+		state.ForceApproveGroups = types.ListNull(types.StringType)
+	}
+
+	state.MandatoryMetadataFields, diags = types.ListValueFrom(ctx, types.StringType, obj.MandatoryMetadataFields)
+	if diags.HasError() {
+		return nil, diags
+	}
+	if len(state.MandatoryMetadataFields.Elements()) == 0 {
+		state.MandatoryMetadataFields = types.ListNull(types.StringType)
+	}
+
+	if obj.MinReviewApprovals != nil {
+		state.MinReviewApprovals = types.Int64Value(int64(*obj.MinReviewApprovals))
+	} else {
+		state.MinReviewApprovals = types.Int64Null()
+	}
+
+	state.ResourceName = types.StringValue(obj.ResourceName)
+	if state.ResourceName.ValueString() == "" {
+		state.ResourceName = types.StringNull()
+	}
+
 	return &state, nil
 }
 
@@ -422,6 +485,14 @@ func toConnectionHoopAPI(ctx context.Context, obj connectionResourceModel) (conn
 	if diags.HasError() {
 		return
 	}
+	forceApproveGroups, diags := convertListToStringSlice(ctx, obj.ForceApproveGroups)
+	if diags.HasError() {
+		return
+	}
+	mandatoryMetadataFields, diags := convertListToStringSlice(ctx, obj.MandatoryMetadataFields)
+	if diags.HasError() {
+		return
+	}
 
 	var connectionTags map[string]string
 	diags = obj.Tags.ElementsAs(ctx, &connectionTags, false)
@@ -435,23 +506,40 @@ func toConnectionHoopAPI(ctx context.Context, obj connectionResourceModel) (conn
 		return conn, diags
 	}
 
+	var accessMaxDuration *int
+	if !obj.AccessMaxDuration.IsNull() && !obj.AccessMaxDuration.IsUnknown() {
+		v := int(obj.AccessMaxDuration.ValueInt64())
+		accessMaxDuration = &v
+	}
+
+	var minReviewApprovals *int
+	if !obj.MinReviewApprovals.IsNull() && !obj.MinReviewApprovals.IsUnknown() {
+		v := int(obj.MinReviewApprovals.ValueInt64())
+		minReviewApprovals = &v
+	}
+
 	return hoop.Connection{
-		Name:                obj.Name.ValueString(),
-		Command:             command,
-		Type:                obj.Type.ValueString(),
-		SubType:             obj.Subtype.ValueString(),
-		Secrets:             secrets,
-		AgentId:             obj.AgentID.ValueString(),
-		Reviewers:           Reviewers,
-		RedactEnabled:       true,
-		RedactTypes:         redactTypes,
-		ConnectionTags:      connectionTags,
-		AccessModeRunbooks:  obj.AccessModeRunbooks.ValueString(),
-		AccessModeExec:      obj.AccessModeExec.ValueString(),
-		AccessModeConnect:   obj.AccessModeConnect.ValueString(),
-		AccessSchema:        obj.AccessSchema.ValueString(),
-		GuardRailRules:      guardRailRules,
-		JiraIssueTemplateID: obj.JiraIssueTemplateID.ValueString(),
+		Name:                    obj.Name.ValueString(),
+		Command:                 command,
+		Type:                    obj.Type.ValueString(),
+		SubType:                 obj.Subtype.ValueString(),
+		Secrets:                 secrets,
+		AgentId:                 obj.AgentID.ValueString(),
+		Reviewers:               Reviewers,
+		RedactEnabled:           true,
+		RedactTypes:             redactTypes,
+		ConnectionTags:          connectionTags,
+		AccessModeRunbooks:      obj.AccessModeRunbooks.ValueString(),
+		AccessModeExec:          obj.AccessModeExec.ValueString(),
+		AccessModeConnect:       obj.AccessModeConnect.ValueString(),
+		AccessSchema:            obj.AccessSchema.ValueString(),
+		GuardRailRules:          guardRailRules,
+		JiraIssueTemplateID:     obj.JiraIssueTemplateID.ValueString(),
+		AccessMaxDuration:       accessMaxDuration,
+		ForceApproveGroups:      forceApproveGroups,
+		MandatoryMetadataFields: mandatoryMetadataFields,
+		MinReviewApprovals:      minReviewApprovals,
+		ResourceName:            obj.ResourceName.ValueString(),
 	}, nil
 }
 

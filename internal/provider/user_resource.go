@@ -207,7 +207,7 @@ func (r *userResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	if err := r.client.DeleteUser(state.Email.ValueString()); err != nil {
+	if err := r.client.DeleteUser(state.ID.ValueString()); err != nil {
 		resp.Diagnostics.AddError(
 			"Error Deleting User",
 			fmt.Sprintf("Failed to delete user %q: %v", state.Email.ValueString(), err),
