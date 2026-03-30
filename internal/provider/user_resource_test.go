@@ -39,19 +39,26 @@ func createFakeUserTestServer() clientFunc {
 				return httpTestErr(http.StatusNotFound, `user with email %q not found`, userEmail), nil
 			}
 			return httpTestOk(http.StatusOK, usr), nil
-		// PUT /api/users/{user_email} endpoint
+		// PUT /api/users/{id} endpoint
 		case http.MethodPut:
 			var user hoop.User
 			if err := json.NewDecoder(req.Body).Decode(&user); err != nil {
 				return httpTestErr(http.StatusInternalServerError, `unable to decode request, reason: %v`, err), nil
 			}
 			parts := strings.Split(req.URL.Path, "/")
-			userEmail := parts[len(parts)-1]
-			if _, ok := store[userEmail]; !ok {
-				return httpTestErr(http.StatusNotFound, `user with email %q not found`, userEmail), nil
+			userID := parts[len(parts)-1]
+			var existingUser *hoop.User
+			for _, u := range store {
+				if u.ID == userID {
+					existingUser = u
+					break
+				}
 			}
-			user.ID = store[userEmail].ID
-			store[userEmail] = &user
+			if existingUser == nil {
+				return httpTestErr(http.StatusNotFound, `user with id %q not found`, userID), nil
+			}
+			user.ID = existingUser.ID
+			store[existingUser.Email] = &user
 			return httpTestOk(http.StatusOK, user), nil
 		case http.MethodDelete:
 			return &http.Response{

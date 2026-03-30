@@ -29,7 +29,11 @@ func createFakeRunbookConfigurationTestServer() clientFunc {
 			}
 			resource.Repository = "fake-git-url-normalization" // no need to check this value for this tests
 			store[resourceID] = &resource
-			return httpTestOk(http.StatusCreated, &resource), nil
+			configResp := hoop.RunbookConfig{
+				ID:           uuid.NewString(),
+				Repositories: []hoop.RunbookRepo{resource},
+			}
+			return httpTestOk(http.StatusCreated, &configResp), nil
 		// GET /api/runbooks/configurations endpoint
 		case http.MethodGet:
 			var resource hoop.RunbookConfig
@@ -39,7 +43,7 @@ func createFakeRunbookConfigurationTestServer() clientFunc {
 				resource.Repositories = append(resource.Repositories, *repo)
 			}
 			return httpTestOk(http.StatusOK, &resource), nil
-		// PUT /api/datamasking-rules/{id} endpoint
+		// PUT /api/runbooks/configurations/{id} endpoint
 		case http.MethodPut:
 			var resource hoop.RunbookRepo
 			if err := json.NewDecoder(req.Body).Decode(&resource); err != nil {
@@ -59,7 +63,11 @@ func createFakeRunbookConfigurationTestServer() clientFunc {
 			}
 			resource.Repository = "fake-git-url-normalization" // no need to check this value for this tests
 			store[resourceID] = &resource
-			return httpTestOk(http.StatusOK, resource), nil
+			configResp := hoop.RunbookConfig{
+				ID:           uuid.NewString(),
+				Repositories: []hoop.RunbookRepo{resource},
+			}
+			return httpTestOk(http.StatusOK, &configResp), nil
 		case http.MethodDelete:
 			parts := strings.Split(req.URL.Path, "/")
 			id := parts[len(parts)-1]
