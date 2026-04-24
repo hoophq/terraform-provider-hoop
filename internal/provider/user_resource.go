@@ -100,9 +100,20 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	tflog.Info(ctx, fmt.Sprintf("Read user %q with ID %q, groups=%#v", user.Email, user.ID, user.Groups))
 
+	// Extract current state groups to preserve ordering
+	var stateGroups []string
+	diags = currentState.Groups.ElementsAs(ctx, &stateGroups, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Reorder API groups to match state order, avoiding spurious diffs
+	orderedGroups := reorderGroups(stateGroups, user.Groups)
+
 	currentState.ID = types.StringValue(user.ID)
 	currentState.Status = types.StringValue(user.Status)
-	currentState.Groups, diags = types.ListValueFrom(ctx, types.StringType, user.Groups)
+	currentState.Groups, diags = types.ListValueFrom(ctx, types.StringType, orderedGroups)
 	if diags.HasError() {
 		resp.Diagnostics.AddError(
 			"Error Converting Groups",
@@ -238,4 +249,28 @@ func (r *userResource) Configure(_ context.Context, req resource.ConfigureReques
 		return
 	}
 	r.client = client
+}
+
+// reorderGroups returns apiGroups reordered to match the order in stateGroups.
+// Groups present in the API but not in the state are appended at the end.
+func reorderGroups(stateGroups, apiGroups []string) []string {
+	apiSet := make(map[string]struct{}, len(apiGroups))
+	for _, g := range apiGroups {
+		apiSet[g] = struct{}{}
+	}
+
+	ordered := make([]string, 0, len(apiGroups))
+	for _, g := range stateGroups {
+		if _, ok := apiSet[g]; ok {
+			ordered = append(ordered, g)
+			delete(apiSet, g)
+		}
+	}
+	// Append any groups the API returned that weren't in the state
+	for _, g := range apiGroups {
+		if _, ok := apiSet[g]; ok {
+			ordered = append(ordered, g)
+		}
+	}
+	return ordered
 }
