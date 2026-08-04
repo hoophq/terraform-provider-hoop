@@ -8,7 +8,7 @@ terraform {
 }
 
 provider "hoop" {
-  api_key = "<org-id>|<random-key>"
+  api_key = "<hpk_...>"
   api_url = "http://localhost:8009/api"
 }
 
