@@ -3,7 +3,6 @@
 package hoop
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -32,22 +31,16 @@ type Connection struct {
 }
 
 func (c *Client) GetConnection(name string) (*Connection, error) {
-	apiURL := fmt.Sprintf("%s/connections/%s", c.apiURL, name)
-
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := c.newRequest("GET", "/connections/"+name, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return decodeConnection(resp.Body)
-	}
-	return nil, validateErr(resp)
+	return decodeConnection(resp.Body)
 }
 
 func (c *Client) CreateConnection(conn Connection) (*Connection, error) {
@@ -56,22 +49,16 @@ func (c *Client) CreateConnection(conn Connection) (*Connection, error) {
 		return nil, fmt.Errorf("failed to marshal connection, reason=%v", err)
 	}
 
-	apiURL := fmt.Sprintf("%s/connections", c.apiURL)
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(body))
+	req, err := c.newRequest("POST", "/connections", body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusCreated)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection, reason=%v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusCreated {
-		return decodeConnection(resp.Body)
-	}
-	return nil, validateErr(resp)
+	return decodeConnection(resp.Body)
 }
 
 func (c *Client) UpdateConnection(conn Connection) (*Connection, error) {
@@ -80,41 +67,24 @@ func (c *Client) UpdateConnection(conn Connection) (*Connection, error) {
 		return nil, fmt.Errorf("failed to marshal connection, reason=%v", err)
 	}
 
-	apiURL := fmt.Sprintf("%s/connections/%s", c.apiURL, conn.Name)
-	req, err := http.NewRequest("PUT", apiURL, bytes.NewBuffer(body))
+	req, err := c.newRequest("PUT", "/connections/"+conn.Name, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection, reason=%v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return decodeConnection(resp.Body)
-	}
-	return nil, validateErr(resp)
+	return decodeConnection(resp.Body)
 }
 
 func (c *Client) DeleteConnection(name string) error {
-	apiURL := fmt.Sprintf("%s/connections/%s", c.apiURL, name)
-
-	req, err := http.NewRequest("DELETE", apiURL, nil)
+	req, err := c.newRequest("DELETE", "/connections/"+name, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request, reason=%v", err)
+		return err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to delete connection, reason=%v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	return validateErr(resp)
+	return c.sendDiscard(req, http.StatusNoContent)
 }
 
 func decodeConnection(responseBody io.Reader) (*Connection, error) {

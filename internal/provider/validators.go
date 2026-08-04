@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
 
 var NonEmptyListValidator = []validator.List{
@@ -26,6 +27,10 @@ var NonEmptyMapValidator = []validator.Map{
 
 var AccessModeValidator = []validator.String{
 	stringvalidator.OneOf("enabled", "disabled"),
+}
+
+var AuthSchemeValidator = []validator.String{
+	stringvalidator.OneOf(hoop.AuthSchemes...),
 }
 
 var ConnectionTypeValidator = []validator.String{

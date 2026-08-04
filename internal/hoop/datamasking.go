@@ -3,9 +3,9 @@
 package hoop
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -32,144 +32,64 @@ type CustomEntityTypesEntry struct {
 }
 
 func (c *Client) GetDatamaskingRule(resourceID string) (*DataMaskingRule, error) {
-	apiURL := fmt.Sprintf("%s/datamasking-rules/%s", c.apiURL, resourceID)
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := c.newRequest("GET", "/datamasking-rules/"+resourceID, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		var resource DataMaskingRule
-		err := json.NewDecoder(resp.Body).Decode(&resource)
-		if err != nil {
-			return nil, fmt.Errorf("failed decoding data masking rule resource, reason=%v", err)
-		}
-		return &resource, nil
-	}
-	return nil, validateErr(resp)
+	return decodeDatamaskingRule(resp.Body)
 }
 
 func (c *Client) CreateDatamaskingRule(rule DataMaskingRule) (*DataMaskingRule, error) {
-	apiURL := fmt.Sprintf("%s/datamasking-rules", c.apiURL)
 	body, err := json.Marshal(rule)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal data masking rule, reason=%v", err)
 	}
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(body))
+	req, err := c.newRequest("POST", "/datamasking-rules", body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusCreated)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create data masking rule, reason=%v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusCreated {
-		var resource DataMaskingRule
-		err := json.NewDecoder(resp.Body).Decode(&resource)
-		if err != nil {
-			return nil, fmt.Errorf("failed decoding data masking rule resource, reason=%v", err)
-		}
-		return &resource, nil
-	}
-	return nil, validateErr(resp)
+	return decodeDatamaskingRule(resp.Body)
 }
 
 func (c *Client) UpdateDatamaskingRule(rule DataMaskingRule) (*DataMaskingRule, error) {
-	apiURL := fmt.Sprintf("%s/datamasking-rules/%s", c.apiURL, rule.ID)
 	body, err := json.Marshal(rule)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal data masking rule, reason=%v", err)
 	}
-	req, err := http.NewRequest("PUT", apiURL, bytes.NewBuffer(body))
+	req, err := c.newRequest("PUT", "/datamasking-rules/"+rule.ID, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update data masking rule, reason=%v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		var resource DataMaskingRule
-		err := json.NewDecoder(resp.Body).Decode(&resource)
-		if err != nil {
-			return nil, fmt.Errorf("failed decoding data masking rule resource, reason=%v", err)
-		}
-		return &resource, nil
-	}
-	return nil, validateErr(resp)
+	return decodeDatamaskingRule(resp.Body)
 }
 
 func (c *Client) DeleteDatamaskingRule(resourceID string) error {
-	apiURL := fmt.Sprintf("%s/datamasking-rules/%s", c.apiURL, resourceID)
-	req, err := http.NewRequest("DELETE", apiURL, nil)
+	req, err := c.newRequest("DELETE", "/datamasking-rules/"+resourceID, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request, reason=%v", err)
+		return err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to delete data masking rule, reason=%v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	return validateErr(resp)
+	return c.sendDiscard(req, http.StatusNoContent)
 }
 
-// func (c *Client) DeleteConnection(name string) error {
-// 	apiURL := fmt.Sprintf("%s/connections/%s", c.apiURL, name)
-
-// 	req, err := http.NewRequest("DELETE", apiURL, nil)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create request, reason=%v", err)
-// 	}
-// 	req.Header.Set("Api-Key", c.token)
-// 	resp, err := c.httpClient.Do(req)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to delete connection, reason=%v", err)
-// 	}
-// 	defer resp.Body.Close()
-// 	if resp.StatusCode == http.StatusNoContent {
-// 		return nil
-// 	}
-// 	return validateErr(resp)
-// }
-
-// func decodeConnection(responseBody io.Reader) (*Connection, error) {
-// 	var conn Connection
-// 	err := json.NewDecoder(responseBody).Decode(&conn)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed decoding connection resource, reason=%v", err)
-// 	}
-// 	secrets := map[string]string{}
-// 	for key, val := range conn.Secrets {
-// 		decVal, err := base64.StdEncoding.DecodeString(val)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("failed to decode secret %q, reason=%v", key, err)
-// 		}
-// 		secrets[key] = string(decVal)
-// 	}
-// 	conn.Secrets = secrets
-// 	return &conn, nil
-// }
-
-// func encodeConnection(conn Connection) ([]byte, error) {
-// 	secrets := map[string]string{}
-// 	for key, val := range conn.Secrets {
-// 		secrets[key] = base64.StdEncoding.EncodeToString([]byte(val))
-// 	}
-// 	conn.Secrets = secrets
-// 	return json.Marshal(conn)
-// }
+func decodeDatamaskingRule(responseBody io.Reader) (*DataMaskingRule, error) {
+	var resource DataMaskingRule
+	if err := json.NewDecoder(responseBody).Decode(&resource); err != nil {
+		return nil, fmt.Errorf("failed decoding data masking rule resource, reason=%v", err)
+	}
+	return &resource, nil
+}

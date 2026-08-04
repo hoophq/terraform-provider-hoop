@@ -3,9 +3,9 @@
 package hoop
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -17,75 +17,54 @@ type PluginConnection struct {
 }
 
 func (c *Client) GetPluginConnection(pluginName, connectionID string) (*PluginConnection, error) {
-	apiURL := fmt.Sprintf("%s/plugins/%s/conn/%s", c.apiURL, pluginName, connectionID)
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := c.newRequest("GET", pluginConnectionPath(pluginName, connectionID), nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		var resource PluginConnection
-		err := json.NewDecoder(resp.Body).Decode(&resource)
-		if err != nil {
-			return nil, fmt.Errorf("failed decoding connection resource, reason=%v", err)
-		}
-		if resource.Config == nil {
-			resource.Config = []string{}
-		}
-		return &resource, nil
-	}
-	return nil, validateErr(resp)
+	return decodePluginConnection(resp.Body)
 }
 
 func (c *Client) UpsertPluginConnection(pluginName, connectionID string, config []string) (*PluginConnection, error) {
-	apiURL := fmt.Sprintf("%s/plugins/%s/conn/%s", c.apiURL, pluginName, connectionID)
 	jsonData, err := json.Marshal(map[string]any{"config": config})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal plugin connection, reason=%v", err)
 	}
-	req, err := http.NewRequest("PUT", apiURL, bytes.NewBuffer(jsonData))
+	req, err := c.newRequest("PUT", pluginConnectionPath(pluginName, connectionID), jsonData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		var resource PluginConnection
-		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("failed decoding plugin connection resource, reason=%v", err)
-		}
-		if resource.Config == nil {
-			resource.Config = []string{}
-		}
-		return &resource, nil
-	}
-	return nil, validateErr(resp)
+	return decodePluginConnection(resp.Body)
 }
 
 func (c *Client) DeletePluginConnection(pluginName, connectionID string) error {
-	apiURL := fmt.Sprintf("%s/plugins/%s/conn/%s", c.apiURL, pluginName, connectionID)
-	req, err := http.NewRequest("DELETE", apiURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request, reason=%v", err)
-	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	req, err := c.newRequest("DELETE", pluginConnectionPath(pluginName, connectionID), nil)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
+	return c.sendDiscard(req, http.StatusNoContent)
+}
+
+func pluginConnectionPath(pluginName, connectionID string) string {
+	return fmt.Sprintf("/plugins/%s/conn/%s", pluginName, connectionID)
+}
+
+func decodePluginConnection(responseBody io.Reader) (*PluginConnection, error) {
+	var resource PluginConnection
+	if err := json.NewDecoder(responseBody).Decode(&resource); err != nil {
+		return nil, fmt.Errorf("failed decoding plugin connection resource, reason=%v", err)
 	}
-	return validateErr(resp)
+	if resource.Config == nil {
+		resource.Config = []string{}
+	}
+	return &resource, nil
 }

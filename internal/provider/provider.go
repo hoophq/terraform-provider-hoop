@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
 
@@ -44,8 +45,9 @@ type hoopProvider struct {
 
 // hashicupsProviderModel maps provider schema data to a Go type.
 type hoopProviderModel struct {
-	ApiURL types.String `tfsdk:"api_url"`
-	ApiKey types.String `tfsdk:"api_key"`
+	ApiURL     types.String `tfsdk:"api_url"`
+	ApiKey     types.String `tfsdk:"api_key"`
+	AuthScheme types.String `tfsdk:"auth_scheme"`
 }
 
 // Metadata returns the provider type name.
@@ -67,6 +69,14 @@ func (p *hoopProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 				Description: "The API Key to authenticate in the Hoop Gateway. May also be provided via `HOOP_APIKEY` environment variable.",
 				Optional:    true,
 				Sensitive:   true,
+			},
+			"auth_scheme": schema.StringAttribute{
+				Description: "How the API Key is sent to the Hoop Gateway. One of `auto` (default), `bearer` or `api_key`. " +
+					"With `auto`, organization API keys (prefixed `hpk_`) are sent as `Authorization: Bearer <api_key>` " +
+					"and any other value is sent in the legacy `Api-Key` header. " +
+					"Set it explicitly only to override that detection.",
+				Optional:   true,
+				Validators: AuthSchemeValidator,
 			},
 		},
 	}
@@ -103,6 +113,15 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		)
 	}
 
+	if config.AuthScheme.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("auth_scheme"),
+			"Unknown Hoop Auth Scheme",
+			"The provider cannot create the Hoop Gateway client as there is an unknown configuration value for the authentication scheme. "+
+				"Either target apply the source of the value first or set the value statically in the configuration.",
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -127,8 +146,8 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		resp.Diagnostics.AddAttributeError(
 			path.Root("api_url"),
 			"Missing Hoop API URL",
-			"The provider cannot create the Hoop Gateway client as there is an unknown configuration value for the Hoop API URL. "+
-				"Either target apply the source of the value first, set the value statically in the configuration, or use the HOOP_APIURL environment variable."+
+			"The provider cannot create the Hoop Gateway client as there is a missing configuration value for the Hoop API URL. "+
+				"Set the value statically in the configuration or use the HOOP_APIURL environment variable. "+
 				"If either is already set, ensure the value is not empty.",
 		)
 	}
@@ -137,8 +156,8 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		resp.Diagnostics.AddAttributeError(
 			path.Root("api_key"),
 			"Missing Hoop API Key",
-			"The provider cannot create the Hoop Gateway client as there is an unknown configuration value for the Hoop API Key. "+
-				"Either target apply the source of the value first, set the value statically in the configuration, or use the HOOP_APIKEY environment variable."+
+			"The provider cannot create the Hoop Gateway client as there is a missing configuration value for the Hoop API Key. "+
+				"Set the value statically in the configuration or use the HOOP_APIKEY environment variable. "+
 				"If either is already set, ensure the value is not empty.",
 		)
 	}
@@ -147,7 +166,28 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
-	client := hoop.NewClient(apiURL, apiKey, p.httpClient)
+	authScheme := hoop.AuthSchemeAuto
+	if !config.AuthScheme.IsNull() {
+		authScheme = hoop.AuthScheme(config.AuthScheme.ValueString())
+	}
+
+	client, err := hoop.NewClient(apiURL, apiKey, hoop.ClientOptions{
+		HttpClient:      p.httpClient,
+		AuthScheme:      authScheme,
+		ProviderVersion: p.version,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Create Hoop Gateway Client",
+			"An unexpected error occurred when creating the Hoop Gateway client: "+err.Error(),
+		)
+		return
+	}
+
+	tflog.Info(ctx, "configured the hoop gateway client", map[string]any{
+		"api_url":     apiURL,
+		"auth_scheme": string(client.AuthScheme()),
+	})
 
 	// Make the HashiCups client available during DataSource and Resource
 	// type Configure methods.

@@ -1,7 +1,8 @@
+// Copyright (c) HashiCorp, Inc.
+
 package hoop
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,31 +28,25 @@ type RunbookRepo struct {
 }
 
 func (c *Client) GetRunbookConfigByURL(gitURL string) (*RunbookRepo, error) {
-	apiURL := fmt.Sprintf("%s/runbooks/configurations", c.apiURL)
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := c.newRequest("GET", "/runbooks/configurations", nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		var resource RunbookConfig
-		err := json.NewDecoder(resp.Body).Decode(&resource)
-		if err != nil {
-			return nil, fmt.Errorf("failed decoding runbooks configuration resource, reason=%v", err)
-		}
-		for _, repo := range resource.Repositories {
-			if repo.GitURL == gitURL {
-				return &repo, nil
-			}
-		}
-		return nil, fmt.Errorf("git repository %q not found", gitURL)
+	var resource RunbookConfig
+	if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
+		return nil, fmt.Errorf("failed decoding runbooks configuration resource, reason=%v", err)
 	}
-	return nil, validateErr(resp)
+	for _, repo := range resource.Repositories {
+		if repo.GitURL == gitURL {
+			return &repo, nil
+		}
+	}
+	return nil, fmt.Errorf("git repository %q not found", gitURL)
 }
 
 func (c *Client) CreateRunbookRepo(repo RunbookRepo) (*RunbookRepo, error) {
@@ -65,22 +60,11 @@ func (c *Client) UpdateRunbookRepoByID(repo RunbookRepo) (*RunbookRepo, error) {
 
 func (c *Client) DeleteRunbookRepoByID(gitURL string) error {
 	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte(gitURL)).String()
-	apiURL := fmt.Sprintf("%s/runbooks/configurations/%s", c.apiURL, id)
-	req, err := http.NewRequest("DELETE", apiURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create DELETE request, reason=%v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	req, err := c.newRequest("DELETE", "/runbooks/configurations/"+id, nil)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	return validateErr(resp)
+	return c.sendDiscard(req, http.StatusNoContent)
 }
 
 // doRunbookRequestWithBody issue a POST or PUT request to the runbook API with the provided body.
@@ -88,32 +72,27 @@ func (c *Client) DeleteRunbookRepoByID(gitURL string) error {
 // If id is provided, it will issue a PUT request to update the existing runbook configuration.
 func (c *Client) doRunbookRequestWithBody(id string, repo RunbookRepo) (*RunbookRepo, error) {
 	method := "POST"
-	apiURL := fmt.Sprintf("%s/runbooks/configurations", c.apiURL)
+	path := "/runbooks/configurations"
 	if id != "" {
 		method = "PUT"
-		apiURL = fmt.Sprintf("%s/%s", apiURL, id)
+		path += "/" + id
 	}
 	jsonData, err := json.Marshal(repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal runbook repository configuration, reason=%v", err)
 	}
-	req, err := http.NewRequest(method, apiURL, bytes.NewBuffer(jsonData))
+	req, err := c.newRequest(method, path, jsonData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", c.token)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.send(req, http.StatusOK, http.StatusCreated)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-		var resource RunbookRepo
-		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("failed decoding runbook repository resource, reason=%v", err)
-		}
-		return &resource, nil
+	var resource RunbookRepo
+	if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
+		return nil, fmt.Errorf("failed decoding runbook repository resource, reason=%v", err)
 	}
-	return nil, validateErr(resp)
+	return &resource, nil
 }
