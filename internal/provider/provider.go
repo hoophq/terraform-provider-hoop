@@ -184,8 +184,11 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
+	// api_url is not a sensitive attribute, but an operator may still have put
+	// userinfo or a secret query parameter in it, so only the redacted form is
+	// ever logged.
 	tflog.Info(ctx, "configured the hoop gateway client", map[string]any{
-		"api_url":     apiURL,
+		"api_url":     client.RedactedAPIURL(),
 		"auth_scheme": string(client.AuthScheme()),
 	})
 

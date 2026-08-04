@@ -66,6 +66,11 @@ func NewClient(apiURL, token string, opts ClientOptions) (*Client, error) {
 // never AuthSchemeAuto.
 func (c *Client) AuthScheme() AuthScheme { return c.authScheme }
 
+// RedactedAPIURL returns the gateway URL stripped of anything that could carry
+// a credential. It is the only form of the URL that may be logged; the raw one
+// is deliberately unreachable from outside the package.
+func (c *Client) RedactedAPIURL() string { return redactURL(c.apiURL) }
+
 // newRequest builds a request against the configured gateway. path is appended
 // to the API URL and must start with a slash; a non-nil body is sent as JSON.
 //
@@ -80,7 +85,11 @@ func (c *Client) newRequest(method, path string, body []byte) (*http.Request, er
 	}
 	req, err := http.NewRequest(method, c.apiURL+path, reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request, reason=%v", err)
+		// urlErrorReason keeps the api_url out of the message: net/url reports
+		// the offending URL verbatim, userinfo included, and this error reaches
+		// the operator as a Terraform diagnostic.
+		return nil, fmt.Errorf("failed to create request for %s %s, reason=%v",
+			method, path, urlErrorReason(err))
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
