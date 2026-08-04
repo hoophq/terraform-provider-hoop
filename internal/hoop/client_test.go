@@ -7,8 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 type clientFunc func(req *http.Request) (*http.Response, error)
@@ -196,6 +200,124 @@ func TestAPIErrorHints(t *testing.T) {
 	}
 }
 
+// Fixtures shared by the endpoint table. The git URL is hashed into the request
+// path by the runbook endpoints, so the expectation derives it the same way.
+const (
+	testAPIURL     = "http://localhost:8009/api"
+	testConnName   = "pgdemo"
+	testUserEmail  = "john@hoop.dev"
+	testPluginName = "runbooks"
+	testConnID     = "conn-id"
+	testRuleID     = "rule-id"
+	testGitURL     = "https://github.com/hoophq/runbooks.git"
+)
+
+func testRunbookRepoID() string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(testGitURL)).String()
+}
+
+// endpointCall drives one *Client method and spells out every request it must
+// issue, in order.
+//
+// The expectation is written per endpoint rather than counted in aggregate. A
+// method that gives up before reaching its own request — as UpdateUser does
+// when the GetUser it chains fails — still contributes one request to a total,
+// so a bare count cannot tell "the PUT went out" from "the PUT never happened".
+type endpointCall struct {
+	// method is the *Client method name, cross-checked against the type by
+	// TestEveryExportedEndpointIsCovered.
+	method string
+	call   func(*Client)
+	wants  []string
+}
+
+func clientEndpoints() []endpointCall {
+	repoID := testRunbookRepoID()
+	return []endpointCall{
+		{"GetConnection", func(c *Client) { _, _ = c.GetConnection(testConnName) },
+			[]string{"GET /api/connections/" + testConnName}},
+		{"CreateConnection", func(c *Client) { _, _ = c.CreateConnection(Connection{Name: testConnName}) },
+			[]string{"POST /api/connections"}},
+		{"UpdateConnection", func(c *Client) { _, _ = c.UpdateConnection(Connection{Name: testConnName}) },
+			[]string{"PUT /api/connections/" + testConnName}},
+		{"DeleteConnection", func(c *Client) { _ = c.DeleteConnection(testConnName) },
+			[]string{"DELETE /api/connections/" + testConnName}},
+
+		{"GetUser", func(c *Client) { _, _ = c.GetUser(testUserEmail) },
+			[]string{"GET /api/users/" + testUserEmail}},
+		{"CreateUser", func(c *Client) { _, _ = c.CreateUser(testUserEmail, "active", nil) },
+			[]string{"POST /api/users"}},
+		// UpdateUser reads the user before writing it back.
+		{"UpdateUser", func(c *Client) { _, _ = c.UpdateUser(testUserEmail, "active", nil) },
+			[]string{"GET /api/users/" + testUserEmail, "PUT /api/users/" + testUserEmail}},
+		{"DeleteUser", func(c *Client) { _ = c.DeleteUser(testUserEmail) },
+			[]string{"DELETE /api/users/" + testUserEmail}},
+
+		{"GetPlugin", func(c *Client) { _, _ = c.GetPlugin(testPluginName) },
+			[]string{"GET /api/plugins/" + testPluginName}},
+		{"GetPluginConfig", func(c *Client) { _, _ = c.GetPluginConfig(testPluginName) },
+			[]string{"GET /api/plugins/" + testPluginName}},
+		// CreatePluginConfig stops at its existence check: GetPlugin never
+		// reports a missing plugin, so the upsert behind it is unreachable.
+		{"CreatePluginConfig", func(c *Client) { _, _ = c.CreatePluginConfig(testPluginName, nil) },
+			[]string{"GET /api/plugins/" + testPluginName}},
+		{"UpdatePluginConfig", func(c *Client) { _, _ = c.UpdatePluginConfig(testPluginName, nil) },
+			[]string{"GET /api/plugins/" + testPluginName, "PUT /api/plugins/" + testPluginName + "/config"}},
+		{"DeletePluginConfig", func(c *Client) { _ = c.DeletePluginConfig(testPluginName) },
+			[]string{"GET /api/plugins/" + testPluginName, "PUT /api/plugins/" + testPluginName + "/config"}},
+		{"upsertPluginConfig", func(c *Client) { _, _ = c.upsertPluginConfig(testPluginName, nil) },
+			[]string{"PUT /api/plugins/" + testPluginName + "/config"}},
+
+		{"GetPluginConnection", func(c *Client) { _, _ = c.GetPluginConnection(testPluginName, testConnID) },
+			[]string{"GET /api/plugins/" + testPluginName + "/conn/" + testConnID}},
+		{"UpsertPluginConnection", func(c *Client) { _, _ = c.UpsertPluginConnection(testPluginName, testConnID, nil) },
+			[]string{"PUT /api/plugins/" + testPluginName + "/conn/" + testConnID}},
+		{"DeletePluginConnection", func(c *Client) { _ = c.DeletePluginConnection(testPluginName, testConnID) },
+			[]string{"DELETE /api/plugins/" + testPluginName + "/conn/" + testConnID}},
+
+		{"GetDatamaskingRule", func(c *Client) { _, _ = c.GetDatamaskingRule(testRuleID) },
+			[]string{"GET /api/datamasking-rules/" + testRuleID}},
+		{"CreateDatamaskingRule", func(c *Client) { _, _ = c.CreateDatamaskingRule(DataMaskingRule{}) },
+			[]string{"POST /api/datamasking-rules"}},
+		{"UpdateDatamaskingRule", func(c *Client) { _, _ = c.UpdateDatamaskingRule(DataMaskingRule{ID: testRuleID}) },
+			[]string{"PUT /api/datamasking-rules/" + testRuleID}},
+		{"DeleteDatamaskingRule", func(c *Client) { _ = c.DeleteDatamaskingRule(testRuleID) },
+			[]string{"DELETE /api/datamasking-rules/" + testRuleID}},
+
+		{"GetRunbookConfigByURL", func(c *Client) { _, _ = c.GetRunbookConfigByURL(testGitURL) },
+			[]string{"GET /api/runbooks/configurations"}},
+		{"CreateRunbookRepo", func(c *Client) { _, _ = c.CreateRunbookRepo(RunbookRepo{GitURL: testGitURL}) },
+			[]string{"POST /api/runbooks/configurations"}},
+		{"UpdateRunbookRepoByID", func(c *Client) { _, _ = c.UpdateRunbookRepoByID(RunbookRepo{GitURL: testGitURL}) },
+			[]string{"PUT /api/runbooks/configurations/" + repoID}},
+		{"DeleteRunbookRepoByID", func(c *Client) { _ = c.DeleteRunbookRepoByID(testGitURL) },
+			[]string{"DELETE /api/runbooks/configurations/" + repoID}},
+
+		{"GetRunbookRuleByID", func(c *Client) { _, _ = c.GetRunbookRuleByID(testRuleID) },
+			[]string{"GET /api/runbooks/rules/" + testRuleID}},
+		{"CreateRunbookRule", func(c *Client) { _, _ = c.CreateRunbookRule(RunbookRule{}) },
+			[]string{"POST /api/runbooks/rules"}},
+		{"UpdateRunbookRuleByID", func(c *Client) { _, _ = c.UpdateRunbookRuleByID(RunbookRule{ID: testRuleID}) },
+			[]string{"PUT /api/runbooks/rules/" + testRuleID}},
+		{"DeleteRunbookRuleByID", func(c *Client) { _ = c.DeleteRunbookRuleByID(testRuleID) },
+			[]string{"DELETE /api/runbooks/rules/" + testRuleID}},
+	}
+}
+
+// endpointSuccessStatus answers each request with the status its endpoint
+// treats as success, so a chained endpoint reaches the request it exists for
+// instead of bailing out on the first one.
+func endpointSuccessStatus(method string) int {
+	switch method {
+	case "POST":
+		return http.StatusCreated
+	case "DELETE":
+		return http.StatusNoContent
+	default:
+		return http.StatusOK
+	}
+}
+
 // TestEveryEndpointSendsTheResolvedCredential walks the whole client surface to
 // prove no endpoint was missed when request construction was centralised.
 func TestEveryEndpointSendsTheResolvedCredential(t *testing.T) {
@@ -217,59 +339,56 @@ func TestEveryEndpointSendsTheResolvedCredential(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			calls := 0
-			transport := clientFunc(func(req *http.Request) (*http.Response, error) {
-				calls++
-				if got := req.Header.Get("Api-Key"); got != tt.wantAPIKey {
-					t.Errorf("%s %s: Api-Key header: got %q, want %q", req.Method, req.URL.Path, got, tt.wantAPIKey)
-				}
-				if got := req.Header.Get("Authorization"); got != tt.wantAuthHeader {
-					t.Errorf("%s %s: Authorization header: got %q, want %q", req.Method, req.URL.Path, got, tt.wantAuthHeader)
-				}
-				// Any payload is fine here, the assertions are on the request.
-				return testResponse(http.StatusInternalServerError, `{"message":"unused"}`), nil
-			})
+			for _, endpoint := range clientEndpoints() {
+				t.Run(endpoint.method, func(t *testing.T) {
+					var got []string
+					transport := clientFunc(func(req *http.Request) (*http.Response, error) {
+						got = append(got, req.Method+" "+req.URL.Path)
+						if v := req.Header.Get("Api-Key"); v != tt.wantAPIKey {
+							t.Errorf("%s %s: Api-Key header: got %q, want %q", req.Method, req.URL.Path, v, tt.wantAPIKey)
+						}
+						if v := req.Header.Get("Authorization"); v != tt.wantAuthHeader {
+							t.Errorf("%s %s: Authorization header: got %q, want %q", req.Method, req.URL.Path, v, tt.wantAuthHeader)
+						}
+						return testResponse(endpointSuccessStatus(req.Method), "{}"), nil
+					})
 
-			client, err := NewClient("http://localhost:8009/api", tt.token, ClientOptions{HttpClient: transport})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+					client, err := NewClient(testAPIURL, tt.token, ClientOptions{HttpClient: transport})
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					endpoint.call(client)
 
-			endpoints := []func(){
-				func() { _, _ = client.GetConnection("pgdemo") },
-				func() { _, _ = client.CreateConnection(Connection{Name: "pgdemo"}) },
-				func() { _, _ = client.UpdateConnection(Connection{Name: "pgdemo"}) },
-				func() { _ = client.DeleteConnection("pgdemo") },
-				func() { _, _ = client.GetUser("john@hoop.dev") },
-				func() { _, _ = client.CreateUser("john@hoop.dev", "active", nil) },
-				func() { _, _ = client.UpdateUser("john@hoop.dev", "active", nil) },
-				func() { _ = client.DeleteUser("john@hoop.dev") },
-				func() { _, _ = client.GetPlugin("runbooks") },
-				func() { _, _ = client.GetPluginConfig("runbooks") },
-				func() { _, _ = client.upsertPluginConfig("runbooks", nil) },
-				func() { _, _ = client.GetPluginConnection("runbooks", "id") },
-				func() { _, _ = client.UpsertPluginConnection("runbooks", "id", nil) },
-				func() { _ = client.DeletePluginConnection("runbooks", "id") },
-				func() { _, _ = client.GetDatamaskingRule("id") },
-				func() { _, _ = client.CreateDatamaskingRule(DataMaskingRule{}) },
-				func() { _, _ = client.UpdateDatamaskingRule(DataMaskingRule{}) },
-				func() { _ = client.DeleteDatamaskingRule("id") },
-				func() { _, _ = client.GetRunbookConfigByURL("https://github.com/hoophq/runbooks.git") },
-				func() { _, _ = client.CreateRunbookRepo(RunbookRepo{}) },
-				func() { _, _ = client.UpdateRunbookRepoByID(RunbookRepo{}) },
-				func() { _ = client.DeleteRunbookRepoByID("https://github.com/hoophq/runbooks.git") },
-				func() { _, _ = client.GetRunbookRuleByID("id") },
-				func() { _, _ = client.CreateRunbookRule(RunbookRule{}) },
-				func() { _, _ = client.UpdateRunbookRuleByID(RunbookRule{}) },
-				func() { _ = client.DeleteRunbookRuleByID("id") },
-			}
-			for _, call := range endpoints {
-				call()
-			}
-
-			if calls != len(endpoints) {
-				t.Errorf("issued %d requests for %d endpoints", calls, len(endpoints))
+					if !slices.Equal(got, endpoint.wants) {
+						t.Errorf("requests issued: got %v, want %v", got, endpoint.wants)
+					}
+				})
 			}
 		})
+	}
+}
+
+// TestEveryExportedEndpointIsCovered fails when a method is added to the client
+// without an entry in clientEndpoints, so credential coverage cannot quietly
+// fall behind the API surface.
+func TestEveryExportedEndpointIsCovered(t *testing.T) {
+	// Methods that deliberately issue no request.
+	noRequest := map[string]bool{
+		"AuthScheme":     true,
+		"RedactedAPIURL": true,
+	}
+
+	covered := map[string]bool{}
+	for _, endpoint := range clientEndpoints() {
+		covered[endpoint.method] = true
+	}
+
+	clientType := reflect.TypeOf(&Client{})
+	for i := range clientType.NumMethod() {
+		name := clientType.Method(i).Name
+		if noRequest[name] || covered[name] {
+			continue
+		}
+		t.Errorf("exported client method %s has no entry in clientEndpoints", name)
 	}
 }
