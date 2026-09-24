@@ -205,6 +205,7 @@ func (p *hoopProvider) DataSources(_ context.Context) []func() datasource.DataSo
 // Resources defines the resources implemented in the provider.
 func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		NewAgentResource,
 		NewConnectionResource,
 		NewPluginConnectionResource,
 		NewPluginConfigResource,

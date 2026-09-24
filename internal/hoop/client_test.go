@@ -204,6 +204,7 @@ func TestAPIErrorHints(t *testing.T) {
 // path by the runbook endpoints, so the expectation derives it the same way.
 const (
 	testAPIURL     = "http://localhost:8009/api"
+	testAgentName  = "terraform-agent"
 	testConnName   = "pgdemo"
 	testUserEmail  = "john@hoop.dev"
 	testPluginName = "runbooks"
@@ -234,6 +235,13 @@ type endpointCall struct {
 func clientEndpoints() []endpointCall {
 	repoID := testRunbookRepoID()
 	return []endpointCall{
+		{"GetAgent", func(c *Client) { _, _ = c.GetAgent(testAgentName) },
+			[]string{"GET /api/agents/" + testAgentName}},
+		{"CreateAgent", func(c *Client) { _, _ = c.CreateAgent(testAgentName, "standard") },
+			[]string{"POST /api/agents", "GET /api/agents/" + testAgentName}},
+		{"DeleteAgent", func(c *Client) { _ = c.DeleteAgent(testAgentName) },
+			[]string{"DELETE /api/agents/" + testAgentName}},
+
 		{"GetConnection", func(c *Client) { _, _ = c.GetConnection(testConnName) },
 			[]string{"GET /api/connections/" + testConnName}},
 		{"CreateConnection", func(c *Client) { _, _ = c.CreateConnection(Connection{Name: testConnName}) },

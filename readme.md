@@ -5,6 +5,7 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 
 ## Supported Resources
 
+- [x] Agents
 - [x] Connections
 - [x] Plugin Connection
 - [x] Plugin Configuration
