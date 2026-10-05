@@ -28,6 +28,9 @@ type Connection struct {
 	AccessSchema        string            `json:"access_schema"`
 	GuardRailRules      []string          `json:"guardrail_rules"`
 	JiraIssueTemplateID string            `json:"jira_issue_template_id"`
+	// ManagedBy names the owner of the connection. "sidecar" marks a mirror
+	// of a sidecar listener; the sidecar owns it, not Terraform.
+	ManagedBy *string `json:"managed_by,omitempty"`
 }
 
 func (c *Client) GetConnection(name string) (*Connection, error) {

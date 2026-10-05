@@ -54,6 +54,46 @@ type connectionResource struct {
 	client *hoop.Client
 }
 
+// connectionManagedBySidecar is the managed_by value of a connection that
+// mirrors a sidecar listener.
+const connectionManagedBySidecar = "sidecar"
+
+// isSidecarManaged reports whether the sidecar owns the connection.
+func isSidecarManaged(conn *hoop.Connection) bool {
+	return conn != nil && conn.ManagedBy != nil && *conn.ManagedBy == connectionManagedBySidecar
+}
+
+// addSidecarReadOnlyError fails the operation for a sidecar connection.
+// It is an error, not a warning: a warning would let Terraform keep the
+// connection in state and plan updates or a delete the gateway refuses, and
+// dropping it from state would make Terraform plan to create it again.
+func addSidecarReadOnlyError(diags *diag.Diagnostics, name string) {
+	diags.AddError(
+		"Connection Is Managed by a Sidecar",
+		fmt.Sprintf("Connection %q mirrors a sidecar listener. The sidecar owns it, so Terraform cannot manage it. "+
+			"Remove it from your configuration and state (terraform state rm), and change it in the sidecar configuration.", name),
+	)
+}
+
+// refuseSidecarConnection returns true and adds an error when the remote
+// connection is managed by a sidecar, or when its owner cannot be read. It
+// guards Update and Delete when Terraform skips the refresh (-refresh=false).
+func (r *connectionResource) refuseSidecarConnection(diags *diag.Diagnostics, name string) bool {
+	conn, err := r.client.GetConnection(name)
+	if err != nil {
+		diags.AddError(
+			"Error Reading Connection",
+			fmt.Sprintf("Failed to read connection %q before changing it: %v", name, err),
+		)
+		return true
+	}
+	if !isSidecarManaged(conn) {
+		return false
+	}
+	addSidecarReadOnlyError(diags, name)
+	return true
+}
+
 // Metadata returns the resource type name.
 func (r *connectionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_connection"
@@ -63,6 +103,12 @@ func (r *connectionResource) Metadata(_ context.Context, req resource.MetadataRe
 func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manage a connection resource in Hoop Platform.",
+		MarkdownDescription: "Manage a connection resource in Hoop Platform.\n\n" +
+			"Connections that mirror a sidecar listener (`managed_by = \"sidecar\"`) are read only. " +
+			"The sidecar owns them, so import, refresh, update and delete fail with an error. " +
+			"The provider fails instead of warning: a warning keeps the connection in state and plans changes " +
+			"the gateway refuses, and removing it from state makes Terraform plan to create it again. " +
+			"Change these connections in the sidecar configuration.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the connection resource.",
@@ -179,6 +225,10 @@ func (r *connectionResource) Read(ctx context.Context, req resource.ReadRequest,
 		)
 		return
 	}
+	if isSidecarManaged(connection) {
+		addSidecarReadOnlyError(&resp.Diagnostics, currentState.Name.ValueString())
+		return
+	}
 
 	newState, diags := toConnectionResourceModel(ctx, currentState, connection)
 	if diags.HasError() {
@@ -243,6 +293,9 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if r.refuseSidecarConnection(&resp.Diagnostics, plan.Name.ValueString()) {
+		return
+	}
 
 	reqConn, diags := toConnectionHoopAPI(ctx, plan)
 	if diags.HasError() {
@@ -284,6 +337,9 @@ func (r *connectionResource) Delete(ctx context.Context, req resource.DeleteRequ
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if r.refuseSidecarConnection(&resp.Diagnostics, state.Name.ValueString()) {
 		return
 	}
 
