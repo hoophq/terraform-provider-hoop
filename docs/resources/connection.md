@@ -4,14 +4,14 @@ page_title: "hoop_connection Resource - hoop"
 subcategory: ""
 description: |-
   Manage a connection resource in Hoop Platform.
-  Connections that mirror a sidecar listener (managed_by = "sidecar") are read only. The sidecar owns them, so import, refresh, update and delete fail with an error. The provider fails instead of warning: a warning keeps the connection in state and plans changes the gateway refuses, and removing it from state makes Terraform plan to create it again. Change these connections in the sidecar configuration.
+  Connections that mirror a sidecar listener (managed_by = "sidecar") are read only. The sidecar owns them, so import, refresh, update and delete fail with an error. The provider fails instead of warning: a warning keeps the connection in state and plans changes the gateway refuses, and removing it from state makes Terraform plan to create it again. Change these connections in the sidecar configuration. Other resources, such as hoop_plugin_connection and hoop_datamasking_rules, can still reference a sidecar connection by its ID.
 ---
 
 # hoop_connection (Resource)
 
 Manage a connection resource in Hoop Platform.
 
-Connections that mirror a sidecar listener (`managed_by = "sidecar"`) are read only. The sidecar owns them, so import, refresh, update and delete fail with an error. The provider fails instead of warning: a warning keeps the connection in state and plans changes the gateway refuses, and removing it from state makes Terraform plan to create it again. Change these connections in the sidecar configuration.
+Connections that mirror a sidecar listener (`managed_by = "sidecar"`) are read only. The sidecar owns them, so import, refresh, update and delete fail with an error. The provider fails instead of warning: a warning keeps the connection in state and plans changes the gateway refuses, and removing it from state makes Terraform plan to create it again. Change these connections in the sidecar configuration. Other resources, such as `hoop_plugin_connection` and `hoop_datamasking_rules`, can still reference a sidecar connection by its ID.
 
 ## Example Usage
 
