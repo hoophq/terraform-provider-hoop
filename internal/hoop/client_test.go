@@ -351,6 +351,23 @@ func clientEndpoints() []endpointCall {
 			[]string{"GET /api/serverinfo"}},
 		{"CheckEnterpriseLicense", func(c *Client) { _, _ = c.CheckEnterpriseLicense() },
 			[]string{"GET /api/serverinfo"}},
+
+		{"CreateAccessRequestRule", func(c *Client) { _, _ = c.CreateAccessRequestRule(AccessRequestRule{}) },
+			[]string{"POST /api/access-requests/rules"}},
+		{"GetAccessRequestRule", func(c *Client) { _, _ = c.GetAccessRequestRule(testRuleName) },
+			[]string{"GET /api/access-requests/rules/" + testRuleName}},
+		{"UpdateAccessRequestRule", func(c *Client) { _, _ = c.UpdateAccessRequestRule(AccessRequestRule{Name: testRuleName}) },
+			[]string{"PUT /api/access-requests/rules/" + testRuleName}},
+		{"DeleteAccessRequestRule", func(c *Client) { _ = c.DeleteAccessRequestRule(testRuleName) },
+			[]string{"DELETE /api/access-requests/rules/" + testRuleName}},
+
+		{"ListFeatureFlags", func(c *Client) { _, _ = c.ListFeatureFlags() },
+			[]string{"GET /api/feature-flags"}},
+		// GetFeatureFlag lists and picks; the gateway has no per-flag read.
+		{"GetFeatureFlag", func(c *Client) { _, _ = c.GetFeatureFlag(testRuleName) },
+			[]string{"GET /api/feature-flags"}},
+		{"SetFeatureFlag", func(c *Client) { _, _ = c.SetFeatureFlag(testRuleName, true) },
+			[]string{"PUT /api/feature-flags/" + testRuleName}},
 	}
 }
 

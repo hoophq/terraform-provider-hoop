@@ -160,6 +160,53 @@ Three things about `sidecar_targets`:
 - Declare it and Terraform owns the set. Removing the attribute later sends an empty set, and the plan warns with the number of listeners the rule leaves.
 - Guardrails append to the listener's own guardrails block. Masking rules replace the listener's own mask block, and several bound to one listener concatenate into it; what two rules naming the same entity do is the sidecar's call, the control plane does not check it. Two analyzer rules on one listener is refused.
 
+## Hold statements for approval
+
+An analyzer rule can hold a statement until someone releases it. Who may do that is an access request rule with `access_type = "sidecar"`, named from the analyzer block:
+
+```terraform
+resource "hoop_access_request_rule" "dba_approvals" {
+  name             = "dba-approvals"
+  access_type      = "sidecar"
+  reviewers_groups = ["dba-leads"]
+  min_approvals    = 1
+  pending_ttl_sec  = 900
+  approval_ttl_sec = 600
+}
+
+resource "hoop_ai_session_analyzer_rule" "appdb" {
+  name = "appdb-analysis"
+  risk_evaluation = {
+    low_risk    = { action = "allow_execution" }
+    medium_risk = { action = "allow_execution" }
+    high_risk   = { action = "block_execution" }
+  }
+  sidecar_spec = jsonencode({
+    trigger       = "statement"
+    high          = "require_review"
+    approval_rule = hoop_access_request_rule.dba_approvals.name
+  })
+  sidecar_targets = [{ sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" }]
+}
+```
+
+Leave `approval_rule` out and the analyzer rule holds under its own name: the gateway creates and manages the access request rule for it, and `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec` on `hoop_ai_session_analyzer_rule` drive it. Use a separate `hoop_access_request_rule` when several analyzer rules share one approval policy.
+
+Reviews raised this way are posted in Slack to the channels in `hoop_sidecar.slack_channels` for that listener.
+
+## Record what the sidecars see
+
+Sidecars enforce whether or not the control plane records their traffic. Recording is behind an organization flag, off by default:
+
+```terraform
+resource "hoop_feature_flag" "sidecar_session_events" {
+  name    = "experimental.sidecar_session_events"
+  enabled = true
+}
+```
+
+With it on, each sidecar session shows in the session list with `identity_type = "sidecar"`.
+
 ## Watch the fleet converge
 
 `hoop_sidecar` and `data.hoop_sidecar` report what each sidecar runs:

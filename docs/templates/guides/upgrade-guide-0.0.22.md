@@ -14,6 +14,8 @@ Version 0.0.22 adds the resources that manage a sidecar fleet from Terraform, an
 | `hoop_guardrail` | `/api/guardrails` | no |
 | `hoop_ai_session_analyzer_rule` | `/api/ai/session-analyzer/rules` | no |
 | `data.hoop_sidecar` | `GET /api/sidecars/{name}` | yes |
+| `hoop_access_request_rule` | `/api/access-requests/rules` | no |
+| `hoop_feature_flag` | `/api/feature-flags` | no |
 
 A gateway without an Enterprise license answers the licensed routes with `403`. The provider asks `/serverinfo` first and refuses the plan:
 
@@ -51,6 +53,12 @@ The gateway treats a request without `sidecar_targets` as "keep the bindings", a
 | had `sidecar_targets`, now removed | `[]` | null |
 
 `sidecar_spec`, `reviewers_groups`, `pending_ttl_sec`, `approval_ttl_sec` and `hoop_sidecar.slack_channels` follow the same table. A rule bound from the control plane UI keeps its bindings under a Terraform configuration that does not mention them. To make Terraform the owner of an empty binding set, declare `sidecar_targets = []`.
+
+## Approvals and sessions for a fleet
+
+`hoop_access_request_rule` with `access_type = "sidecar"` is the policy a sidecar review is filed under: who may release a held statement, how many approvals, how long a statement waits and how long an approval lasts. An analyzer rule names it through `approval_rule` in its `sidecar_spec`. An analyzer rule that holds under its own name gets such a rule created and managed by the gateway (`managed_by = "ai-session-analyzer"`), driven by `reviewers_groups` and the TTLs on `hoop_ai_session_analyzer_rule`; the resource is for a rule several analyzer rules share. The same resource manages `jit`, `command` and `jit_command` rules for connections.
+
+`hoop_feature_flag` sets an organization flag. `experimental.sidecar_session_events` is off by default, and while it is off sidecar traffic is enforced and never recorded as sessions.
 
 ## `hoop_datamasking_rules`
 

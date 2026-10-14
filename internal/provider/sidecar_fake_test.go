@@ -397,6 +397,16 @@ func refuseNamelessTarget(rule map[string]json.RawMessage) *http.Response {
 	return nil
 }
 
+// dropZeroLimits does what the gateway does with a review limit of 0: it
+// stores no limit and answers no key (services.StoredSidecarReviewTTL).
+func dropZeroLimits(rule map[string]json.RawMessage) {
+	for _, key := range []string{"pending_ttl_sec", "approval_ttl_sec"} {
+		if v, ok := rule[key]; ok && string(v) == "0" {
+			delete(rule, key)
+		}
+	}
+}
+
 // nullEmptyConnections does what the gateway does with a rule that names no
 // connections: it answers null, not []. A resource that reads that null into
 // a required list attribute plans a change on every run.
@@ -431,6 +441,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 			in["sidecar_targets"] = json.RawMessage("[]")
 		}
 		nullEmptyConnections(in)
+		dropZeroLimits(in)
 		g.rules[g.key(in)] = in
 		return httpTestOk(http.StatusCreated, in), nil
 	}
@@ -454,7 +465,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 		in["id"] = stored["id"]
 		// The gateway's three-way reading: a key that is absent keeps the
 		// stored value, a JSON null clears, anything else replaces.
-		for _, kept := range []string{"sidecar_targets", "sidecar_spec", "reviewers_groups"} {
+		for _, kept := range []string{"sidecar_targets", "sidecar_spec", "reviewers_groups", "pending_ttl_sec", "approval_ttl_sec"} {
 			if _, present := in[kept]; !present {
 				if v, had := stored[kept]; had {
 					in[kept] = v
@@ -464,6 +475,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 			}
 		}
 		nullEmptyConnections(in)
+		dropZeroLimits(in)
 		delete(g.rules, key)
 		g.rules[g.key(in)] = in
 		return httpTestOk(http.StatusOK, in), nil

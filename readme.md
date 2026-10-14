@@ -14,6 +14,8 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 - [x] Guardrails
 - [x] AI Session Analyzer Rules
 - [x] Sidecars, Sidecar Service Accounts
+- [x] Access Request Rules
+- [x] Feature Flags
 
 ## Documentation
 

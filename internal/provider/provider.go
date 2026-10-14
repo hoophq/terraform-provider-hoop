@@ -220,5 +220,7 @@ func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewSidecarServiceAccountResource,
 		NewGuardrailResource,
 		NewAnalyzerRuleResource,
+		NewAccessRequestRuleResource,
+		NewFeatureFlagResource,
 	}
 }
