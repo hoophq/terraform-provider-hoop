@@ -17,7 +17,7 @@ const guardrailSpec = `jsonencode({
 
 func TestGuardrailResource(t *testing.T) {
 	gw := newFakeRuleGateway("/guardrails", false)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),

@@ -197,3 +197,18 @@ terraform import hoop_ai_session_analyzer_rule.appdb appdb-analysis   # by name
 ```
 
 An imported `hoop_sidecar` has no `token`; the gateway cannot return it. An imported rule has null `sidecar_targets` and `sidecar_spec` in state until the configuration declares them.
+
+## Destroying a sidecar
+
+`terraform destroy` on a `hoop_sidecar` deletes it on the control plane and records its name. A pod that identifies itself with a platform token and maps to that name is refused from then on, so a fleet does not quietly recreate what an admin removed. To let the name be used again, clear it:
+
+```shell
+curl -X DELETE -H "Authorization: Bearer $HOOP_API_KEY" \
+  https://hoop.example.com/api/sidecar-deleted-names/gke-eu-ws-123
+```
+
+A sidecar that was only bound to an identity, with no `hoop_sidecar` resource, is not touched by `terraform destroy`; removing the `hoop_sidecar_service_account` stops new pods from authenticating and leaves the sidecars in place.
+
+## Switching a sidecar back to its own file
+
+`load_from_disk = true` hands the document back to the sidecar's config file. The switch, in either direction, detaches every rule bound to the sidecar: rules that came from its file and nothing else uses are deleted, the rest are unbound. The plan warns with the count, and the apply lists each rule by name. Rules Terraform manages come back on the next apply; until then the sidecar runs without them.

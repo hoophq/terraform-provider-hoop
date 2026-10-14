@@ -39,7 +39,7 @@ func sidecarListenerConfig(name, protocol string) string {
 // listener, and a binding to the whole sidecar blocks neither.
 func TestSidecarResourceRefusesBreakingBoundListener(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest:               true,
 		ProtoV6ProviderFactories: sidecarFactories(gw),
 		Steps: []resource.TestStep{
@@ -102,7 +102,7 @@ resource "hoop_sidecar" "payments" {
     ]
   })
 }`
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest:               true,
 		ProtoV6ProviderFactories: sidecarFactories(gw),
 		Steps: []resource.TestStep{
@@ -137,7 +137,7 @@ func TestSidecarResourceRefusesWithoutLicense(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gw := newFakeSidecarGateway(t)
 			gw.license = tt.license
-			resource.Test(t, resource.TestCase{
+			resource.ParallelTest(t, resource.TestCase{
 				IsUnitTest:               true,
 				ProtoV6ProviderFactories: sidecarFactories(gw),
 				Steps: []resource.TestStep{
@@ -154,7 +154,7 @@ func TestSidecarResourceRefusesWithoutLicense(t *testing.T) {
 func TestSidecarServiceAccountResourceRefusesWithoutLicense(t *testing.T) {
 	gw := newFakeRuleGateway("/sidecar-service-accounts", false)
 	gw.license = fakeLicense{set: true, typ: "oss", valid: true, status: "valid"}
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),

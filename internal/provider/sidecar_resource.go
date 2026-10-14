@@ -117,9 +117,11 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "The sidecar name, unique in the organization. Changing it replaces the sidecar and its token.",
-				Required:    true,
-				Validators:  NonEmptyStringValidator,
+				Description: "The sidecar name, unique in the organization. Changing it replaces the sidecar and its token. " +
+					"Destroying a sidecar records its name, and an identity that maps to that name is refused until an " +
+					"admin clears it with `DELETE /api/sidecar-deleted-names/{name}`.",
+				Required:   true,
+				Validators: NonEmptyStringValidator,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -136,8 +138,9 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"load_from_disk": schema.BoolAttribute{
 				Description: "When true the sidecar runs its own config file and the control plane serves only the " +
-					"license. Switching it on detaches the rules imported from this sidecar; switching it off clears " +
-					"the stored document before `configuration` is written.",
+					"license. A switch in either direction detaches every rule bound to the sidecar: rules imported " +
+					"from its file that nothing else uses are deleted, the rest unbound. The plan warns, the apply " +
+					"lists them. Switching it off also clears the stored document before `configuration` is written.",
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(false),
@@ -270,6 +273,14 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	resp.Diagnostics.Append(state.BoundRules.ElementsAs(ctx, &bound, false)...)
 	if resp.Diagnostics.HasError() || len(bound) == 0 {
 		return
+	}
+	// The owner switch detaches every rule bound to this sidecar, in either
+	// direction. Say so while the operator can still stop.
+	if !plan.LoadFromDisk.IsUnknown() && plan.LoadFromDisk.ValueBool() != state.LoadFromDisk.ValueBool() {
+		resp.Diagnostics.AddAttributeWarning(path.Root("load_from_disk"), "Owner Switch Detaches Bound Rules",
+			fmt.Sprintf("Changing load_from_disk unbinds the %d rule(s) bound to sidecar %q. Rules imported from this "+
+				"sidecar's file that nothing else uses are deleted. Rules managed by Terraform are recreated or rebound "+
+				"on the next apply; the sidecar runs without them until then.", len(bound), state.Name.ValueString()))
 	}
 	before := listenerProtocols(state.Configuration)
 	after := listenerProtocols(plan.Configuration)
@@ -543,11 +554,13 @@ func (r *sidecarResource) Update(ctx context.Context, req resource.UpdateRequest
 			flag = "true"
 		}
 		patch := json.RawMessage(fmt.Sprintf(`{%q: %s}`, loadFromDiskKey, flag))
-		if _, err := r.client.PatchSidecarConfiguration(id, patch); err != nil {
+		switched, err := r.client.PatchSidecarConfiguration(id, patch)
+		if err != nil {
 			resp.Diagnostics.AddError("Error Switching Sidecar Configuration Owner",
 				fmt.Sprintf("Failed to set load_from_disk to %s on sidecar %q: %v", flag, plan.Name.ValueString(), err))
 			return
 		}
+		reportDetachedRules(plan.Name.ValueString(), switched.DetachedRules, &resp.Diagnostics)
 	}
 
 	doc, err := documentForWrite(plan.Configuration, plan.LoadFromDisk.ValueBool())
@@ -615,4 +628,32 @@ func (r *sidecarResource) Configure(_ context.Context, req resource.ConfigureReq
 		return
 	}
 	r.client = client
+}
+
+// reportDetachedRules turns the PATCH answer of an owner switch into a
+// warning naming each rule it deleted or unbound. A deleted rule that
+// Terraform manages comes back on the next apply; an unbound one is rebound
+// when its sidecar_targets are applied again.
+func reportDetachedRules(sidecar string, detached *hoop.SidecarDetachedRules, diags *diag.Diagnostics) {
+	if detached.Empty() {
+		return
+	}
+	var lines []string
+	add := func(verb string, names hoop.SidecarRuleNames) {
+		for _, n := range names.Guardrails {
+			lines = append(lines, fmt.Sprintf("%s guardrail %q", verb, n))
+		}
+		for _, n := range names.DataMasking {
+			lines = append(lines, fmt.Sprintf("%s data masking rule %q", verb, n))
+		}
+		for _, n := range names.Analyzers {
+			lines = append(lines, fmt.Sprintf("%s analyzer rule %q", verb, n))
+		}
+	}
+	add("deleted", detached.Deleted)
+	add("unbound", detached.Unbound)
+	diags.AddAttributeWarning(path.Root("load_from_disk"), "Owner Switch Detached Rules",
+		fmt.Sprintf("Switching load_from_disk on sidecar %q detached these rules:\n\n%s\n\n"+
+			"Run terraform plan to see which of them Terraform will recreate or rebind.",
+			sidecar, strings.Join(lines, "\n")))
 }

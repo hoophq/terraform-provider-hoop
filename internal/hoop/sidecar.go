@@ -28,6 +28,10 @@ type Sidecar struct {
 	BoundRules            []SidecarRuleBinding `json:"bound_rules,omitempty"`
 	BoundRulesUnavailable bool                 `json:"bound_rules_unavailable,omitempty"`
 
+	// DetachedRules is set only on the PATCH answer that flipped
+	// load_from_disk. See the type.
+	DetachedRules *SidecarDetachedRules `json:"detached_rules,omitempty"`
+
 	// The fields below come from the sidecar's handshakes and the gateway's
 	// clock. No write sets them.
 	Version         string `json:"version,omitempty"`
@@ -45,6 +49,31 @@ type SidecarRuleBinding struct {
 	Kind         string `json:"kind"`
 	Name         string `json:"name"`
 	ListenerName string `json:"listener_name"`
+}
+
+// SidecarDetachedRules is what an owner switch (a load_from_disk flip) did to
+// the rules bound to a sidecar. Deleted rules were imported from this
+// sidecar's file and nothing else used them; unbound rules stay for their
+// other targets. The gateway answers it on the PATCH that switched.
+type SidecarDetachedRules struct {
+	Deleted SidecarRuleNames `json:"deleted"`
+	Unbound SidecarRuleNames `json:"unbound"`
+}
+
+// SidecarRuleNames names rules by feature.
+type SidecarRuleNames struct {
+	Guardrails  []string `json:"guardrails"`
+	DataMasking []string `json:"data_masking"`
+	Analyzers   []string `json:"analyzers"`
+}
+
+// Empty reports whether the switch touched no rule.
+func (d *SidecarDetachedRules) Empty() bool {
+	return d == nil || (d.Deleted.count()+d.Unbound.count()) == 0
+}
+
+func (n SidecarRuleNames) count() int {
+	return len(n.Guardrails) + len(n.DataMasking) + len(n.Analyzers)
 }
 
 // SidecarCreated is the answer to a create. Token is the bearer the sidecar

@@ -56,12 +56,12 @@ output "payments_sidecar_token" {
 
 ### Required
 
-- `name` (String) The sidecar name, unique in the organization. Changing it replaces the sidecar and its token.
+- `name` (String) The sidecar name, unique in the organization. Changing it replaces the sidecar and its token. Destroying a sidecar records its name, and an identity that maps to that name is refused until an admin clears it with `DELETE /api/sidecar-deleted-names/{name}`.
 
 ### Optional
 
 - `configuration` (String) The sidecar configuration document as a JSON object, in the schema of the sidecar config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file("sidecar.yaml")))` converts an existing file. The gateway drops zero values from the stored document; the plan compares past them, so `""`, `0`, `false` and empty blocks are harmless. Omit the attribute to store an empty document; the sidecar then refuses to start until one is set. Do not put `load_from_disk` here; use the attribute.
-- `load_from_disk` (Boolean) When true the sidecar runs its own config file and the control plane serves only the license. Switching it on detaches the rules imported from this sidecar; switching it off clears the stored document before `configuration` is written.
+- `load_from_disk` (Boolean) When true the sidecar runs its own config file and the control plane serves only the license. A switch in either direction detaches every rule bound to the sidecar: rules imported from its file that nothing else uses are deleted, the rest unbound. The plan warns, the apply lists them. Switching it off also clears the stored document before `configuration` is written.
 - `slack_channels` (Map of List of String) Slack channel ids per listener name, where that listener's reviews are posted. A listener left out uses the organization's default channel. Leave the attribute out to keep channels set outside Terraform; removing a declared value clears every listener it named.
 
 ### Read-Only

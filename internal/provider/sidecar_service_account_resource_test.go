@@ -12,7 +12,7 @@ import (
 
 func TestSidecarServiceAccountResource(t *testing.T) {
 	gw := newFakeRuleGateway("/sidecar-service-accounts", false)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),

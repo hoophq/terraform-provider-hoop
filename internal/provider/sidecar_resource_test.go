@@ -23,7 +23,7 @@ const sidecarConfigV2 = `jsonencode({
 
 func TestSidecarResource(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
@@ -132,7 +132,7 @@ resource "hoop_sidecar" "payments" {
 
 func TestSidecarResourceRefusesLoadFromDiskInConfiguration(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
@@ -152,7 +152,7 @@ resource "hoop_sidecar" "payments" {
 
 func TestSidecarDataSource(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),

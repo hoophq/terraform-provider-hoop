@@ -191,7 +191,7 @@ resource "hoop_datamasking_rules" "pii" {
   custom_entity_types    = []
   supported_entity_types = [{ name = "PII", entity_types = ["EMAIL_ADDRESS"] }]
 `
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),

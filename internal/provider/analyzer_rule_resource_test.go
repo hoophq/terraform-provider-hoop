@@ -19,7 +19,7 @@ const analyzerRiskEvaluation = `
 
 func TestAnalyzerRuleResource(t *testing.T) {
 	gw := newFakeRuleGateway("/ai/session-analyzer/rules", true)
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		IsUnitTest: true,
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
