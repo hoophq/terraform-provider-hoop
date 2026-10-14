@@ -34,7 +34,7 @@ resource "hoop_guardrail" "no_destructive" {
   sidecar_targets = [
     # One listener of a sidecar this configuration manages.
     { sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" },
-    # Every listener of a sidecar a service account identity created.
-    { sidecar_id = data.hoop_sidecar.gke_eu_ws_123.id },
+    # A listener of a sidecar a service account identity created.
+    { sidecar_id = data.hoop_sidecar.gke_eu_ws_123.id, listener_name = "appdb" },
   ]
 }

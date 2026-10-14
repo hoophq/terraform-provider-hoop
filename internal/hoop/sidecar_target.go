@@ -2,9 +2,10 @@
 
 package hoop
 
-// SidecarRuleTarget is one place the control plane enforces a rule: a sidecar,
-// and one of its listeners. An empty ListenerName selects every listener the
-// sidecar has.
+// SidecarRuleTarget is one place the control plane enforces a rule: a sidecar
+// and one of its listeners. The gateway refuses a target with no listener
+// name (services.ValidateSidecarRuleTargets): a listener's protocol decides
+// which rules it can run, so a rule is always bound per listener.
 type SidecarRuleTarget struct {
 	SidecarID    string `json:"sidecar_id"`
 	ListenerName string `json:"listener_name,omitempty"`

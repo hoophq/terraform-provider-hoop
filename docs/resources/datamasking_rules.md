@@ -3,12 +3,12 @@
 page_title: "hoop_datamasking_rules Resource - hoop"
 subcategory: ""
 description: |-
-  Manages a data masking rule. On the gateway it masks the sessions of connection_ids. On a sidecar fleet, sidecar_spec is the mask block a listener receives and sidecar_targets names the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.
+  Manages a data masking rule. On the gateway it masks the sessions of connection_ids. On a sidecar fleet, sidecar_spec is the mask block a listener receives and sidecar_targets names the listeners. Bound masking rules replace the listener's own mask block; several rules on one listener concatenate into it.
 ---
 
 # hoop_datamasking_rules (Resource)
 
-Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.
+Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names the listeners. Bound masking rules replace the listener's own mask block; several rules on one listener concatenate into it.
 
 ## Example Usage
 
@@ -115,7 +115,7 @@ resource "hoop_datamasking_rules" "rule3" {
 ### Optional
 
 - `sidecar_spec` (String) The rule in the sidecar's own vocabulary, as a JSON object. The control plane places this block on each bound listener. Leave the attribute out to keep the block stored on the gateway; removing a declared value clears it.
-- `sidecar_targets` (Attributes List) The sidecar listeners the control plane distributes this rule to. Each entry names a sidecar and one of its listeners, or the whole sidecar when `listener_name` is empty. Leave the attribute out to keep bindings made outside Terraform. Set it to `[]` to unbind the rule from every sidecar. (see [below for nested schema](#nestedatt--sidecar_targets))
+- `sidecar_targets` (Attributes List) The sidecar listeners the control plane distributes this rule to. Each entry names a sidecar and one of its listeners. Leave the attribute out to keep bindings made outside Terraform. Set it to `[]` to unbind the rule from every sidecar. (see [below for nested schema](#nestedatt--sidecar_targets))
 
 ### Read-Only
 
@@ -146,11 +146,8 @@ Required:
 
 Required:
 
+- `listener_name` (String) The listener on that sidecar. Required: the gateway binds rules per listener, because the listener's protocol decides which rules it can run.
 - `sidecar_id` (String) The sidecar that enforces the rule.
-
-Optional:
-
-- `listener_name` (String) The listener on that sidecar. Empty binds every listener the sidecar has.
 
 ## Import
 

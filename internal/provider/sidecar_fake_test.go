@@ -376,6 +376,27 @@ func (g *fakeRuleGateway) key(rule map[string]json.RawMessage) string {
 	return id
 }
 
+// refuseNamelessTarget is the gateway's ValidateSidecarRuleTargets: a target
+// with no listener name is a 422, because a listener's protocol decides which
+// rules it can carry.
+func refuseNamelessTarget(rule map[string]json.RawMessage) *http.Response {
+	raw, ok := rule["sidecar_targets"]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	var targets []hoop.SidecarRuleTarget
+	if err := json.Unmarshal(raw, &targets); err != nil {
+		return httpTestErr(http.StatusUnprocessableEntity, "malformed sidecar_targets: %v", err)
+	}
+	for _, t := range targets {
+		if t.ListenerName == "" {
+			return httpTestErr(http.StatusUnprocessableEntity,
+				"a rule bound to sidecar %q names no listener; bind it to the listeners that must enforce it", t.SidecarID)
+		}
+	}
+	return nil
+}
+
 // nullEmptyConnections does what the gateway does with a rule that names no
 // connections: it answers null, not []. A resource that reads that null into
 // a required list attribute plans a change on every run.
@@ -400,6 +421,9 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 		if err := json.Unmarshal(body, &in); err != nil {
 			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
 		}
+		if resp := refuseNamelessTarget(in); resp != nil {
+			return resp, nil
+		}
 		g.nextID++
 		id, _ := json.Marshal(fmt.Sprintf("rule-%d", g.nextID))
 		in["id"] = id
@@ -423,6 +447,9 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 		var in map[string]json.RawMessage
 		if err := json.Unmarshal(body, &in); err != nil {
 			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		if resp := refuseNamelessTarget(in); resp != nil {
+			return resp, nil
 		}
 		in["id"] = stored["id"]
 		// The gateway's three-way reading: a key that is absent keeps the

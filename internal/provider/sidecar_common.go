@@ -12,7 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
@@ -47,7 +46,7 @@ var sidecarTargetObjectType = types.ObjectType{
 }
 
 const sidecarTargetsDescription = "The sidecar listeners the control plane distributes this rule to. " +
-	"Each entry names a sidecar and one of its listeners, or the whole sidecar when `listener_name` is empty. " +
+	"Each entry names a sidecar and one of its listeners. " +
 	"Leave the attribute out to keep bindings made outside Terraform. " +
 	"Set it to `[]` to unbind the rule from every sidecar."
 
@@ -66,10 +65,10 @@ func sidecarTargetsAttribute() schema.ListNestedAttribute {
 					Required:    true,
 				},
 				"listener_name": schema.StringAttribute{
-					Description: "The listener on that sidecar. Empty binds every listener the sidecar has.",
-					Optional:    true,
-					Computed:    true,
-					Default:     stringdefault.StaticString(""),
+					Description: "The listener on that sidecar. Required: the gateway binds rules per listener, " +
+						"because the listener's protocol decides which rules it can run.",
+					Required:   true,
+					Validators: NonEmptyStringValidator,
 				},
 			},
 		},

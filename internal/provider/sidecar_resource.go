@@ -212,7 +212,7 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 							Computed:    true,
 						},
 						"listener_name": schema.StringAttribute{
-							Description: "The listener the rule is bound to; empty for the whole sidecar.",
+							Description: "The listener the rule is bound to.",
 							Computed:    true,
 						},
 					},
@@ -287,6 +287,9 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	var broken []string
 	for _, b := range bound {
 		name := b.ListenerName.ValueString()
+		// The gateway refuses a binding with no listener today
+		// (services.ValidateSidecarRuleTargets). Should a later version
+		// distribute whole-sidecar bindings, they name no listener to break.
 		if name == "" {
 			continue
 		}
@@ -308,8 +311,7 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		"The gateway refuses a configuration that removes, renames or re-protocols a listener a rule is bound to, "+
 			"and Terraform applies the sidecar before the rules that depend on it.\n\n"+
 			strings.Join(broken, "\n")+
-			"\n\nUpdate the sidecar_targets of those rules first, in a separate apply, "+
-			"or bind them to the whole sidecar with an empty listener_name.")
+			"\n\nUpdate the sidecar_targets of those rules first, in a separate apply.")
 }
 
 // listenerProtocols maps listener name to protocol for a configuration, or

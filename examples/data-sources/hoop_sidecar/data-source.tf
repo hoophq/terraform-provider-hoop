@@ -13,7 +13,7 @@ resource "hoop_guardrail" "no_destructive" {
     rules = [{ name = "no-destructive", type = "operation", operations = ["delete", "drop"] }]
   })
 
-  sidecar_targets = [{ sidecar_id = data.hoop_sidecar.gke_eu_ws_123.id }]
+  sidecar_targets = [{ sidecar_id = data.hoop_sidecar.gke_eu_ws_123.id, listener_name = "appdb" }]
 }
 
 output "gke_eu_ws_123_config_state" {

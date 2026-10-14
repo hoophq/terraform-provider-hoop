@@ -132,7 +132,7 @@ resource "hoop_guardrail" "no_destructive" {
 
   sidecar_targets = [
     { sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" },
-    { sidecar_id = data.hoop_sidecar.ws_123.id },
+    { sidecar_id = data.hoop_sidecar.ws_123.id, listener_name = "appdb" },
   ]
 }
 
@@ -152,13 +152,13 @@ resource "hoop_datamasking_rules" "emails" {
 }
 ```
 
-An entry without `listener_name` binds every listener the sidecar has. The control plane folds bound rules into the document it serves, so the sidecar picks them up on its next heartbeat and nothing restarts.
+Every entry names a listener: the listener's protocol decides which rules it can run, so the gateway refuses a target without one. The control plane folds bound rules into the document it serves, so the sidecar picks them up on its next heartbeat and nothing restarts.
 
 Three things about `sidecar_targets`:
 
 - Leave it out and Terraform leaves the bindings alone, including ones made in the control plane UI.
 - Declare it and Terraform owns the set. Removing the attribute later sends an empty set, and the plan warns with the number of listeners the rule leaves.
-- A masking rule bound to a listener replaces that listener's mask block. Two masking rules on one listener is last writer wins; keep one per listener. Two analyzer rules on one listener is refused.
+- Guardrails append to the listener's own guardrails block. Masking rules replace the listener's own mask block, and several bound to one listener concatenate into it; what two rules naming the same entity do is the sidecar's call, the control plane does not check it. Two analyzer rules on one listener is refused.
 
 ## Watch the fleet converge
 
@@ -182,7 +182,7 @@ output "payments_state" {
 | You do | What happens |
 |---|---|
 | Plan `hoop_sidecar` on an organization without an Enterprise license | `Error: Enterprise License Required`, before any apply |
-| Rename or remove a listener a rule is bound to | `Error: Listener Change Breaks Bound Rules`, naming the rules. Update their `sidecar_targets` first, or bind them with an empty `listener_name` |
+| Rename or remove a listener a rule is bound to | `Error: Listener Change Breaks Bound Rules`, naming the rules. Update their `sidecar_targets` first |
 | Change a bound listener's protocol | the same error; a rule type the new protocol cannot run would be refused by the gateway |
 | Put `load_from_disk` inside `configuration` | an error pointing at the attribute, which routes the change through the call the gateway requires |
 | Remove `sidecar_targets` from a rule | a warning with the listener and sidecar counts |

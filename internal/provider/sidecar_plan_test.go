@@ -35,8 +35,9 @@ func sidecarListenerConfig(name, protocol string) string {
 	return testProviderBlock + fmt.Sprintf(sidecarWithListener, name, protocol)
 }
 
+// TestSidecarResourceRefusesBreakingBoundListener covers the plan guard: a
 // rule bound to a listener blocks a rename and a protocol change of that
-// listener, and a binding to the whole sidecar blocks neither.
+// listener, and rebinding it elsewhere lifts the block.
 func TestSidecarResourceRefusesBreakingBoundListener(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
 	resource.ParallelTest(t, resource.TestCase{
@@ -68,18 +69,19 @@ func TestSidecarResourceRefusesBreakingBoundListener(t *testing.T) {
 				Config:      sidecarListenerConfig("appdb", "mysql"),
 				ExpectError: regexp.MustCompile(`guardrail "no-delete" is bound to listener "appdb"[\s\S]*moves\s+from postgres to\s+mysql`),
 			},
-			// A whole-sidecar binding names no listener, so a rename is fine.
+			// The rule moved to another sidecar (its sidecar_targets were
+			// applied first): nothing binds appdb and the rename goes through.
 			{
 				PreConfig: func() {
 					gw.mu.Lock()
-					gw.byID["sc-1"].BoundRules = []hoop.SidecarRuleBinding{{Kind: "datamasking", Name: "mask-all", ListenerName: ""}}
+					gw.byID["sc-1"].BoundRules = nil
 					gw.mu.Unlock()
 				},
 				Config: sidecarListenerConfig("appdb", "postgres"),
 			},
 			{
 				Config: sidecarListenerConfig("appdb-v2", "postgres"),
-				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.0.listener_name", ""),
+				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "0"),
 			},
 		},
 	})

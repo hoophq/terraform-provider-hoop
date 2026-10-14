@@ -58,7 +58,8 @@ func (r *datamaskingRulesResource) Schema(_ context.Context, _ resource.SchemaRe
 	resp.Schema = schema.Schema{
 		Description: "Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. " +
 			"On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names " +
-			"the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.",
+			"the listeners. Bound masking rules replace the listener's own mask block; several rules on one " +
+			"listener concatenate into it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",

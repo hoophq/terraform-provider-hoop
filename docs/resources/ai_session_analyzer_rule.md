@@ -71,7 +71,7 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
 - `pending_ttl_sec` (Number) Seconds a held statement's review may wait for a decision, 60 to 604800. The gateway reads it only while `sidecar_spec` holds statements for approval.
 - `reviewers_groups` (List of String) The groups whose members may release a statement this rule holds for approval. With none set the admin group reviews. Leave the attribute out to keep groups set outside Terraform; removing a declared value clears them.
 - `sidecar_spec` (String) The rule in the sidecar's own vocabulary, as a JSON object. The control plane places this block on each bound listener. Leave the attribute out to keep the block stored on the gateway; removing a declared value clears it.
-- `sidecar_targets` (Attributes List) The sidecar listeners the control plane distributes this rule to. Each entry names a sidecar and one of its listeners, or the whole sidecar when `listener_name` is empty. Leave the attribute out to keep bindings made outside Terraform. Set it to `[]` to unbind the rule from every sidecar. (see [below for nested schema](#nestedatt--sidecar_targets))
+- `sidecar_targets` (Attributes List) The sidecar listeners the control plane distributes this rule to. Each entry names a sidecar and one of its listeners. Leave the attribute out to keep bindings made outside Terraform. Set it to `[]` to unbind the rule from every sidecar. (see [below for nested schema](#nestedatt--sidecar_targets))
 
 ### Read-Only
 
@@ -128,11 +128,8 @@ Optional:
 
 Required:
 
+- `listener_name` (String) The listener on that sidecar. Required: the gateway binds rules per listener, because the listener's protocol decides which rules it can run.
 - `sidecar_id` (String) The sidecar that enforces the rule.
-
-Optional:
-
-- `listener_name` (String) The listener on that sidecar. Empty binds every listener the sidecar has.
 
 ## Import
 

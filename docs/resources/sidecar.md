@@ -82,7 +82,7 @@ output "payments_sidecar_token" {
 Read-Only:
 
 - `kind` (String) `guardrail`, `datamasking` or `analyzer`.
-- `listener_name` (String) The listener the rule is bound to; empty for the whole sidecar.
+- `listener_name` (String) The listener the rule is bound to.
 - `name` (String) The rule name.
 
 ## Import

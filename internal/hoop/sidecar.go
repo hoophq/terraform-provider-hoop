@@ -43,8 +43,7 @@ type Sidecar struct {
 }
 
 // SidecarRuleBinding is one rule a sidecar enforces: its kind (guardrail,
-// datamasking or analyzer), its name, and the listener it is bound to. An
-// empty ListenerName is a binding to every listener of the sidecar.
+// datamasking or analyzer), its name, and the listener it is bound to.
 type SidecarRuleBinding struct {
 	Kind         string `json:"kind"`
 	Name         string `json:"name"`

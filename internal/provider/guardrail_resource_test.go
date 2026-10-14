@@ -4,6 +4,7 @@ package provider
 
 import (
 	"encoding/json"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -15,6 +16,38 @@ const guardrailSpec = `jsonencode({
     rules = [{ name = "no-delete", type = "operation", operations = ["delete", "drop"], message = "refused" }]
   })`
 
+// TestGuardrailResourceRefusesNamelessTarget: the gateway binds per listener
+// and answers 422 to a target without one; the schema says so at plan.
+func TestGuardrailResourceRefusesNamelessTarget(t *testing.T) {
+	gw := newFakeRuleGateway("/guardrails", false)
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testProviderBlock + `
+resource "hoop_guardrail" "no_delete" {
+  name            = "no-delete"
+  sidecar_spec    = ` + guardrailSpec + `
+  sidecar_targets = [{ sidecar_id = "sc-1" }]
+}`,
+				ExpectError: regexp.MustCompile(`listener_name`),
+			},
+			{
+				Config: testProviderBlock + `
+resource "hoop_guardrail" "no_delete" {
+  name            = "no-delete"
+  sidecar_spec    = ` + guardrailSpec + `
+  sidecar_targets = [{ sidecar_id = "sc-1", listener_name = "" }]
+}`,
+				ExpectError: regexp.MustCompile(`listener_name`),
+			},
+		},
+	})
+}
+
 func TestGuardrailResource(t *testing.T) {
 	gw := newFakeRuleGateway("/guardrails", false)
 	resource.ParallelTest(t, resource.TestCase{
@@ -23,8 +56,7 @@ func TestGuardrailResource(t *testing.T) {
 			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
 		},
 		Steps: []resource.TestStep{
-			// Declared targets go out as a list; the whole-sidecar entry has
-			// an empty listener_name in state and no listener_name on the wire.
+			// Declared targets go out as a list, one listener each.
 			{
 				Config: testProviderBlock + `
 resource "hoop_guardrail" "no_delete" {
@@ -34,16 +66,16 @@ resource "hoop_guardrail" "no_delete" {
   sidecar_spec = ` + guardrailSpec + `
   sidecar_targets = [
     { sidecar_id = "sc-1", listener_name = "appdb" },
-    { sidecar_id = "sc-2" },
+    { sidecar_id = "sc-2", listener_name = "reports" },
   ]
 }`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("hoop_guardrail.no_delete", "id", "rule-1"),
 					resource.TestCheckResourceAttr("hoop_guardrail.no_delete", "sidecar_targets.#", "2"),
-					resource.TestCheckResourceAttr("hoop_guardrail.no_delete", "sidecar_targets.1.listener_name", ""),
+					resource.TestCheckResourceAttr("hoop_guardrail.no_delete", "sidecar_targets.1.listener_name", "reports"),
 					resource.TestCheckNoResourceAttr("hoop_guardrail.no_delete", "output"),
 					checkLastBody(gw.rec, "POST", "/guardrails", map[string]string{
-						"sidecar_targets": `[{"sidecar_id":"sc-1","listener_name":"appdb"},{"sidecar_id":"sc-2"}]`,
+						"sidecar_targets": `[{"sidecar_id":"sc-1","listener_name":"appdb"},{"sidecar_id":"sc-2","listener_name":"reports"}]`,
 						"sidecar_spec":    `{"rules":[{"name":"no-delete","type":"operation","operations":["delete","drop"],"message":"refused"}]}`,
 						"input":           `{"rules":[{"type":"deny_words_list","words":["DELETE"]}]}`,
 						"output":          `{"rules":[]}`,
@@ -95,7 +127,7 @@ resource "hoop_guardrail" "no_delete" {
 				PreConfig: func() {
 					gw.mu.Lock()
 					defer gw.mu.Unlock()
-					gw.rules["rule-1"]["sidecar_targets"] = json.RawMessage(`[{"sidecar_id":"sc-9"}]`)
+					gw.rules["rule-1"]["sidecar_targets"] = json.RawMessage(`[{"sidecar_id":"sc-9","listener_name":"appdb"}]`)
 				},
 				Config: testProviderBlock + `
 resource "hoop_guardrail" "no_delete" {

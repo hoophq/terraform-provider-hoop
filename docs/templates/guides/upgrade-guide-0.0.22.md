@@ -36,7 +36,7 @@ Add the license under **Settings > License** and plan again. The check runs once
 `hoop_guardrail`, `hoop_datamasking_rules` and `hoop_ai_session_analyzer_rule` carry two attributes:
 
 - `sidecar_spec`: the rule in the sidecar's own vocabulary, as a JSON object.
-- `sidecar_targets`: the sidecar listeners that enforce it, each `{ sidecar_id, listener_name }`. An empty `listener_name` means every listener of that sidecar.
+- `sidecar_targets`: the sidecar listeners that enforce it, each `{ sidecar_id, listener_name }`. Both are required: the gateway binds per listener.
 
 `hoop_sidecar` has no list of rules. The control plane folds every bound rule into the document it serves on each handshake, and the gateway only accepts the binding through the rule's own API.
 
@@ -72,6 +72,6 @@ Error: Listener Change Breaks Bound Rules
 guardrail "no-destructive" is bound to listener "appdb", which this change removes or renames
 ```
 
-Update the `sidecar_targets` of those rules first, in a separate apply, or bind them to the whole sidecar with an empty `listener_name`. Terraform cannot order it for you: the rule depends on the sidecar, so the sidecar always applies first.
+Update the `sidecar_targets` of those rules first, in a separate apply. Terraform cannot order it for you: the rule depends on the sidecar, so the sidecar always applies first.
 
 **A declared `sidecar_targets` is removed.** The plan warns with the number of listeners and sidecars the rule leaves. The write sends `[]`, and the sidecars stop enforcing the rule on their next heartbeat.

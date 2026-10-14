@@ -96,7 +96,7 @@ func (d *sidecarDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 					Attributes: map[string]schema.Attribute{
 						"kind":          schema.StringAttribute{Computed: true, Description: "`guardrail`, `datamasking` or `analyzer`."},
 						"name":          schema.StringAttribute{Computed: true, Description: "The rule name."},
-						"listener_name": schema.StringAttribute{Computed: true, Description: "The listener the rule is bound to; empty for the whole sidecar."},
+						"listener_name": schema.StringAttribute{Computed: true, Description: "The listener the rule is bound to."},
 					},
 				},
 			},
