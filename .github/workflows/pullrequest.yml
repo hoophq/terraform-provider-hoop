@@ -15,6 +15,15 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+      # terraform-plugin-testing downloads Terraform into a shared temp path
+      # when none is on PATH. With parallel tests, one test execs the binary
+      # while another is still writing it: "text file busy" on Linux. A
+      # Terraform on PATH is used as is, and the race is gone.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.*"
+          terraform_wrapper: false
 
       - name: Test
         run: make test
