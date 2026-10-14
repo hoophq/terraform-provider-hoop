@@ -153,6 +153,16 @@ type fakeSidecarGateway struct {
 	byID     map[string]*hoop.Sidecar
 	channels map[string]map[string][]string
 	nextID   int
+	license  fakeLicense
+}
+
+// bind records a rule binding the way the rule API would, so the next read
+// of the sidecar reports it under bound_rules.
+func (g *fakeSidecarGateway) bind(sidecarID string, b hoop.SidecarRuleBinding) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	sc := g.byID[sidecarID]
+	sc.BoundRules = append(sc.BoundRules, b)
 }
 
 func newFakeSidecarGateway(t *testing.T) *fakeSidecarGateway {
@@ -189,11 +199,49 @@ func view(sc *hoop.Sidecar) hoop.Sidecar {
 	return out
 }
 
+// storedDocument is what the gateway keeps of a document: decoded into its
+// struct and re-encoded with every zero value omitted. pruneZero is the
+// provider's model of that encoder; using it here makes the fake answer
+// what a live gateway answered in the smoke run, and the resource-level
+// assertion is that the plan stays empty.
+func storedDocument(raw json.RawMessage) json.RawMessage {
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return raw
+	}
+	pruned, _ := pruneZero(doc, "")
+	out, _ := json.Marshal(pruned)
+	return out
+}
+
+// fakeLicense answers /serverinfo. The zero value reports a valid Enterprise
+// license, which is what every test needs unless it is about the license.
+type fakeLicense struct {
+	typ    string
+	valid  bool
+	status string
+	set    bool
+}
+
+func (l *fakeLicense) serve(req *http.Request) *http.Response {
+	if !strings.HasSuffix(req.URL.Path, "/serverinfo") {
+		return nil
+	}
+	info := hoop.ServerLicenseInfo{Type: "enterprise", IsValid: true, Status: "valid"}
+	if l.set {
+		info = hoop.ServerLicenseInfo{Type: l.typ, IsValid: l.valid, Status: l.status}
+	}
+	return httpTestOk(http.StatusOK, hoop.ServerInfo{LicenseInfo: &info})
+}
+
 func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 	body := g.rec.record(req)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	if resp := g.license.serve(req); resp != nil {
+		return resp, nil
+	}
 	switch {
 	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/sidecars"):
 		var in struct {
@@ -211,7 +259,7 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 		if len(cfg) == 0 {
 			cfg = json.RawMessage("{}")
 		}
-		sc := &hoop.Sidecar{ID: fmt.Sprintf("sc-%d", g.nextID), Name: in.Name, Configuration: cfg}
+		sc := &hoop.Sidecar{ID: fmt.Sprintf("sc-%d", g.nextID), Name: in.Name, Configuration: storedDocument(cfg)}
 		g.byID[sc.ID] = sc
 		return httpTestOk(http.StatusCreated, hoop.SidecarCreated{Sidecar: view(sc), Token: "hsc_" + sc.ID}), nil
 
@@ -261,7 +309,7 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 		if docFlag(sc.Configuration) != docFlag(in.Configuration) {
 			return httpTestErr(http.StatusUnprocessableEntity, "load_from_disk cannot change here: use PATCH"), nil
 		}
-		sc.Configuration = in.Configuration
+		sc.Configuration = storedDocument(in.Configuration)
 		return httpTestOk(http.StatusOK, view(sc)), nil
 	case http.MethodPatch:
 		var in struct {
@@ -305,6 +353,7 @@ type fakeRuleGateway struct {
 	mu         sync.Mutex
 	rules      map[string]map[string]json.RawMessage
 	nextID     int
+	license    fakeLicense
 }
 
 func newFakeRuleGateway(collection string, keyByName bool) *fakeRuleGateway {
@@ -343,6 +392,9 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	if resp := g.license.serve(req); resp != nil {
+		return resp, nil
+	}
 	if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, g.collection) {
 		var in map[string]json.RawMessage
 		if err := json.Unmarshal(body, &in); err != nil {

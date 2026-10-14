@@ -21,6 +21,13 @@ type Sidecar struct {
 	// the document it returns is the canonical form of what was sent.
 	Configuration json.RawMessage `json:"configuration,omitempty"`
 
+	// BoundRules names the rules the control plane folds into the served
+	// document, and the listener each one lands on. The rule APIs own them;
+	// this is a read-only view. BoundRulesUnavailable true means the gateway
+	// could not read them, and an empty BoundRules then means unknown.
+	BoundRules            []SidecarRuleBinding `json:"bound_rules,omitempty"`
+	BoundRulesUnavailable bool                 `json:"bound_rules_unavailable,omitempty"`
+
 	// The fields below come from the sidecar's handshakes and the gateway's
 	// clock. No write sets them.
 	Version         string `json:"version,omitempty"`
@@ -29,6 +36,15 @@ type Sidecar struct {
 	LastError       string `json:"last_error,omitempty"`
 	IdentityIssuer  string `json:"identity_issuer,omitempty"`
 	IdentitySubject string `json:"identity_subject,omitempty"`
+}
+
+// SidecarRuleBinding is one rule a sidecar enforces: its kind (guardrail,
+// datamasking or analyzer), its name, and the listener it is bound to. An
+// empty ListenerName is a binding to every listener of the sidecar.
+type SidecarRuleBinding struct {
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	ListenerName string `json:"listener_name"`
 }
 
 // SidecarCreated is the answer to a create. Token is the bearer the sidecar

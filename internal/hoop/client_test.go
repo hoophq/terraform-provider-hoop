@@ -346,6 +346,11 @@ func clientEndpoints() []endpointCall {
 			[]string{"PUT /api/ai/session-analyzer/rules/" + testRuleName}},
 		{"DeleteAnalyzerRule", func(c *Client) { _ = c.DeleteAnalyzerRule(testRuleName) },
 			[]string{"DELETE /api/ai/session-analyzer/rules/" + testRuleName}},
+
+		{"GetServerInfo", func(c *Client) { _, _ = c.GetServerInfo() },
+			[]string{"GET /api/serverinfo"}},
+		{"CheckEnterpriseLicense", func(c *Client) { _, _ = c.CheckEnterpriseLicense() },
+			[]string{"GET /api/serverinfo"}},
 	}
 }
 

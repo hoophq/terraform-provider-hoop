@@ -45,6 +45,7 @@ output "gke_eu_ws_123_config_state" {
 
 ### Read-Only
 
+- `bound_rules` (Attributes List) The rules the control plane folds into this sidecar's configuration, and the listener each lands on. (see [below for nested schema](#nestedatt--bound_rules))
 - `config_state` (String) What the sidecar runs relative to the stored configuration. See `hoop_sidecar`.
 - `configuration` (String) The stored configuration document, as JSON, without `load_from_disk`.
 - `id` (String) The unique identifier of the sidecar, for `sidecar_targets`.
@@ -54,3 +55,12 @@ output "gke_eu_ws_123_config_state" {
 - `last_seen_at` (String) When the sidecar last handshook, RFC 3339. Empty until it does.
 - `load_from_disk` (Boolean) Whether the sidecar runs its own config file.
 - `version` (String) The sidecar binary version reported at the last handshake.
+
+<a id="nestedatt--bound_rules"></a>
+### Nested Schema for `bound_rules`
+
+Read-Only:
+
+- `kind` (String) `guardrail`, `datamasking` or `analyzer`.
+- `listener_name` (String) The listener the rule is bound to; empty for the whole sidecar.
+- `name` (String) The rule name.

@@ -15,13 +15,15 @@ Version 0.0.22 adds the resources that manage a sidecar fleet from Terraform, an
 | `hoop_ai_session_analyzer_rule` | `/api/ai/session-analyzer/rules` | no |
 | `data.hoop_sidecar` | `GET /api/sidecars/{name}` | yes |
 
-A gateway without an Enterprise license answers the licensed routes with `403` and this message:
+A gateway without an Enterprise license answers the licensed routes with `403`. The provider asks `/serverinfo` first and refuses the plan:
 
 ```
-Error: status=403, payload={"message": "this resource requires a valid enterprise license, ..."}
+Error: Enterprise License Required
+
+hoop_sidecar needs a valid Enterprise license and the gateway reports that the organization's license is of type "oss".
 ```
 
-The provider keeps the resource in state when it sees that answer. Add the license under **Settings > License** and run `terraform apply` again.
+Add the license under **Settings > License** and plan again. The check runs once per `terraform` run. A gateway that cannot be asked is left to answer at apply, and a `403` at apply keeps the resource in state.
 
 ## Two ways to bring a sidecar under Terraform
 
@@ -56,7 +58,20 @@ Two optional attributes, `sidecar_spec` and `sidecar_targets`, as above. A confi
 
 ## `hoop_sidecar.configuration` is a JSON string
 
-Write it with `jsonencode(...)`, or `jsonencode(yamldecode(file("sidecar.yaml")))` to keep the file you already deploy. Two things the gateway does to the document show up in a plan if you fight them:
+Write it with `jsonencode(...)`, or `jsonencode(yamldecode(file("sidecar.yaml")))` to keep the file you already deploy. The gateway drops every zero value from the stored document; the provider compares past them, so `""`, `0`, `false`, `[]` and `{}` in your document do not show up as changes. One key the gateway refuses inside the document is `load_from_disk`: use the attribute, and the provider routes the change through the separate call the gateway requires.
 
-- It drops every zero value. Leave `""`, `0`, `false`, `[]` and `{}` out of your document.
-- It refuses a `load_from_disk` key inside the document. Use the `load_from_disk` attribute; the provider routes the change through the separate call the gateway requires.
+## Plan-time checks
+
+Two failures that used to surface in the middle of an apply now stop the plan.
+
+**A listener a rule is bound to changes.** `hoop_sidecar` reads `bound_rules` from the gateway. A `configuration` that removes, renames or re-protocols a listener named there fails the plan with the rules involved:
+
+```
+Error: Listener Change Breaks Bound Rules
+
+guardrail "no-destructive" is bound to listener "appdb", which this change removes or renames
+```
+
+Update the `sidecar_targets` of those rules first, in a separate apply, or bind them to the whole sidecar with an empty `listener_name`. Terraform cannot order it for you: the rule depends on the sidecar, so the sidecar always applies first.
+
+**A declared `sidecar_targets` is removed.** The plan warns with the number of listeners and sidecars the rule leaves. The write sends `[]`, and the sidecars stop enforcing the rule on their next heartbeat.

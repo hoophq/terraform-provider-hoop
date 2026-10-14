@@ -25,6 +25,7 @@ import (
 var (
 	_ resource.Resource                = &analyzerRuleResource{}
 	_ resource.ResourceWithImportState = &analyzerRuleResource{}
+	_ resource.ResourceWithModifyPlan  = &analyzerRuleResource{}
 )
 
 func NewAnalyzerRuleResource() resource.Resource {
@@ -409,6 +410,21 @@ func (r *analyzerRuleResource) Delete(ctx context.Context, req resource.DeleteRe
 }
 
 // ImportState takes the rule name, which is how the gateway addresses it.
+// ModifyPlan warns when a declared sidecar_targets is removed, since the
+// write that follows unbinds the rule from every sidecar it named.
+func (r *analyzerRuleResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+	var plan, state analyzerRuleResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	warnOnUnbind(ctx, "hoop_ai_session_analyzer_rule", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
+}
+
 func (r *analyzerRuleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }

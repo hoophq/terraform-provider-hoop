@@ -60,12 +60,13 @@ output "payments_sidecar_token" {
 
 ### Optional
 
-- `configuration` (String) The sidecar configuration document as a JSON object, in the schema of the sidecar config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file("sidecar.yaml")))` converts an existing file. Leave zero values out: the gateway drops them and the plan would show them as a change. Omit the attribute to store an empty document; the sidecar then refuses to start until one is set. Do not put `load_from_disk` here; use the attribute.
+- `configuration` (String) The sidecar configuration document as a JSON object, in the schema of the sidecar config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file("sidecar.yaml")))` converts an existing file. The gateway drops zero values from the stored document; the plan compares past them, so `""`, `0`, `false` and empty blocks are harmless. Omit the attribute to store an empty document; the sidecar then refuses to start until one is set. Do not put `load_from_disk` here; use the attribute.
 - `load_from_disk` (Boolean) When true the sidecar runs its own config file and the control plane serves only the license. Switching it on detaches the rules imported from this sidecar; switching it off clears the stored document before `configuration` is written.
 - `slack_channels` (Map of List of String) Slack channel ids per listener name, where that listener's reviews are posted. A listener left out uses the organization's default channel. Leave the attribute out to keep channels set outside Terraform; removing a declared value clears every listener it named.
 
 ### Read-Only
 
+- `bound_rules` (Attributes List) The rules the control plane folds into this sidecar's configuration, read from the gateway. The rule resources own them through `sidecar_targets`; this is a view. The plan refuses a `configuration` change that removes, renames or re-protocols a listener named here. (see [below for nested schema](#nestedatt--bound_rules))
 - `config_state` (String) What the sidecar runs relative to the stored configuration: `applied`, `applying`, `not_applied`, `refused`, `not_served`, `restart` or `unknown`. Empty before the first handshake and under `load_from_disk`.
 - `id` (String) The unique identifier of the sidecar. Rule resources reference it in `sidecar_targets`.
 - `identity_issuer` (String) The issuer of the service account identity bound to this sidecar, if one reached it.
@@ -74,6 +75,15 @@ output "payments_sidecar_token" {
 - `last_seen_at` (String) When the sidecar last handshook, RFC 3339. Empty until it does.
 - `token` (String, Sensitive) The token the sidecar sends in `hoop-sidecar-token`. The gateway shows it once, at creation, and stores a hash, so it lives only in this state. Empty on an imported sidecar.
 - `version` (String) The sidecar binary version reported at the last handshake.
+
+<a id="nestedatt--bound_rules"></a>
+### Nested Schema for `bound_rules`
+
+Read-Only:
+
+- `kind` (String) `guardrail`, `datamasking` or `analyzer`.
+- `listener_name` (String) The listener the rule is bound to; empty for the whole sidecar.
+- `name` (String) The rule name.
 
 ## Import
 

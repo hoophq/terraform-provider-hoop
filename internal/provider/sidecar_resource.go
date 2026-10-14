@@ -6,13 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -23,6 +25,7 @@ var (
 	_ resource.Resource                   = &sidecarResource{}
 	_ resource.ResourceWithImportState    = &sidecarResource{}
 	_ resource.ResourceWithValidateConfig = &sidecarResource{}
+	_ resource.ResourceWithModifyPlan     = &sidecarResource{}
 )
 
 func NewSidecarResource() resource.Resource {
@@ -30,12 +33,13 @@ func NewSidecarResource() resource.Resource {
 }
 
 type sidecarResourceModel struct {
-	ID            types.String         `tfsdk:"id"`
-	Name          types.String         `tfsdk:"name"`
-	Configuration jsontypes.Normalized `tfsdk:"configuration"`
-	LoadFromDisk  types.Bool           `tfsdk:"load_from_disk"`
-	SlackChannels types.Map            `tfsdk:"slack_channels"`
-	Token         types.String         `tfsdk:"token"`
+	ID            types.String       `tfsdk:"id"`
+	Name          types.String       `tfsdk:"name"`
+	Configuration sidecarConfigValue `tfsdk:"configuration"`
+	LoadFromDisk  types.Bool         `tfsdk:"load_from_disk"`
+	SlackChannels types.Map          `tfsdk:"slack_channels"`
+	Token         types.String       `tfsdk:"token"`
+	BoundRules    types.List         `tfsdk:"bound_rules"`
 
 	Version         types.String `tfsdk:"version"`
 	LastSeenAt      types.String `tfsdk:"last_seen_at"`
@@ -43,6 +47,39 @@ type sidecarResourceModel struct {
 	LastError       types.String `tfsdk:"last_error"`
 	IdentityIssuer  types.String `tfsdk:"identity_issuer"`
 	IdentitySubject types.String `tfsdk:"identity_subject"`
+}
+
+// sidecarRuleBindingModel is one bound_rules entry.
+type sidecarRuleBindingModel struct {
+	Kind         types.String `tfsdk:"kind"`
+	Name         types.String `tfsdk:"name"`
+	ListenerName types.String `tfsdk:"listener_name"`
+}
+
+var sidecarRuleBindingObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"kind":          types.StringType,
+		"name":          types.StringType,
+		"listener_name": types.StringType,
+	},
+}
+
+// boundRulesValue is the bindings the gateway reported, or null when it could
+// not read them. Null rather than empty, because the plan guard reads an
+// empty list as "nothing bound" and must not do so for "unknown".
+func boundRulesValue(ctx context.Context, sc *hoop.Sidecar) (types.List, diag.Diagnostics) {
+	if sc.BoundRulesUnavailable {
+		return types.ListNull(sidecarRuleBindingObjectType), nil
+	}
+	items := make([]sidecarRuleBindingModel, 0, len(sc.BoundRules))
+	for _, b := range sc.BoundRules {
+		items = append(items, sidecarRuleBindingModel{
+			Kind:         types.StringValue(b.Kind),
+			Name:         types.StringValue(b.Name),
+			ListenerName: types.StringValue(b.ListenerName),
+		})
+	}
+	return types.ListValueFrom(ctx, sidecarRuleBindingObjectType, items)
 }
 
 type sidecarResource struct {
@@ -86,10 +123,11 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"configuration": schema.StringAttribute{
 				Description: "The sidecar configuration document as a JSON object, in the schema of the sidecar " +
 					"config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file(\"sidecar.yaml\")))` " +
-					"converts an existing file. Leave zero values out: the gateway drops them and the plan would " +
-					"show them as a change. Omit the attribute to store an empty document; the sidecar then refuses " +
-					"to start until one is set. Do not put `load_from_disk` here; use the attribute.",
-				CustomType: jsontypes.NormalizedType{},
+					"converts an existing file. The gateway drops zero values from the stored document; the plan " +
+					"compares past them, so `\"\"`, `0`, `false` and empty blocks are harmless. Omit the attribute to " +
+					"store an empty document; the sidecar then refuses to start until one is set. " +
+					"Do not put `load_from_disk` here; use the attribute.",
+				CustomType: sidecarConfigType{},
 				Optional:   true,
 			},
 			"load_from_disk": schema.BoolAttribute{
@@ -137,10 +175,41 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"identity_issuer": schema.StringAttribute{
 				Description: "The issuer of the service account identity bound to this sidecar, if one reached it.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"identity_subject": schema.StringAttribute{
 				Description: "The subject of the service account identity bound to this sidecar, if one reached it.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"bound_rules": schema.ListNestedAttribute{
+				Description: "The rules the control plane folds into this sidecar's configuration, read from the " +
+					"gateway. The rule resources own them through `sidecar_targets`; this is a view. The plan " +
+					"refuses a `configuration` change that removes, renames or re-protocols a listener named here.",
+				Computed: true,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"kind": schema.StringAttribute{
+							Description: "`guardrail`, `datamasking` or `analyzer`.",
+							Computed:    true,
+						},
+						"name": schema.StringAttribute{
+							Description: "The rule name.",
+							Computed:    true,
+						},
+						"listener_name": schema.StringAttribute{
+							Description: "The listener the rule is bound to; empty for the whole sidecar.",
+							Computed:    true,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -157,9 +226,7 @@ func (r *sidecarResource) ValidateConfig(ctx context.Context, req resource.Valid
 	}
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(data.Configuration.ValueString()), &doc); err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("configuration"),
-			"Invalid Sidecar Configuration",
-			fmt.Sprintf("The configuration must be a JSON object: %v", err))
+		// The type's own validation reports the syntax error.
 		return
 	}
 	if _, ok := doc[loadFromDiskKey]; ok {
@@ -170,9 +237,112 @@ func (r *sidecarResource) ValidateConfig(ctx context.Context, req resource.Valid
 	}
 }
 
+// ModifyPlan catches two failures before the apply starts.
+//
+// The license: every sidecar route needs an Enterprise license, and the
+// gateway answers 403 from the middle of an apply. The same predicate is
+// readable from /serverinfo, so the plan asks first.
+//
+// The listeners: a bound rule names its listener, and the gateway refuses a
+// document that removes, renames or re-protocols a listener a rule is bound
+// to. Terraform orders the rule change after the sidecar it depends on, so
+// the apply would fail on the sidecar and never reach the rule. The bindings
+// came with the last read, so the plan can say which rules stand in the way.
+func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	refuseWithoutEnterpriseLicense(r.client, "hoop_sidecar", &resp.Diagnostics)
+	if req.State.Raw.IsNull() {
+		return
+	}
+	var plan, state sidecarResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() || plan.Configuration.IsUnknown() || state.BoundRules.IsNull() {
+		return
+	}
+	var bound []sidecarRuleBindingModel
+	resp.Diagnostics.Append(state.BoundRules.ElementsAs(ctx, &bound, false)...)
+	if resp.Diagnostics.HasError() || len(bound) == 0 {
+		return
+	}
+	before := listenerProtocols(state.Configuration)
+	after := listenerProtocols(plan.Configuration)
+	var broken []string
+	for _, b := range bound {
+		name := b.ListenerName.ValueString()
+		if name == "" {
+			continue
+		}
+		protocol, kept := after[name]
+		switch {
+		case !kept:
+			broken = append(broken, fmt.Sprintf("%s %q is bound to listener %q, which this change removes or renames",
+				b.Kind.ValueString(), b.Name.ValueString(), name))
+		case protocol != before[name]:
+			broken = append(broken, fmt.Sprintf("%s %q is bound to listener %q, which this change moves from %s to %s",
+				b.Kind.ValueString(), b.Name.ValueString(), name, before[name], protocol))
+		}
+	}
+	if len(broken) == 0 {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(path.Root("configuration"),
+		"Listener Change Breaks Bound Rules",
+		"The gateway refuses a configuration that removes, renames or re-protocols a listener a rule is bound to, "+
+			"and Terraform applies the sidecar before the rules that depend on it.\n\n"+
+			strings.Join(broken, "\n")+
+			"\n\nUpdate the sidecar_targets of those rules first, in a separate apply, "+
+			"or bind them to the whole sidecar with an empty listener_name.")
+}
+
+// listenerProtocols maps listener name to protocol for a configuration, or
+// returns an empty map for a document that does not parse. The gateway
+// already validated anything that reached state, so an unparsable planned
+// document fails elsewhere with the right message.
+func listenerProtocols(cfg sidecarConfigValue) map[string]string {
+	out := map[string]string{}
+	if cfg.IsNull() || cfg.IsUnknown() {
+		return out
+	}
+	var doc struct {
+		Listeners []struct {
+			Name     string `json:"name"`
+			Protocol string `json:"protocol"`
+		} `json:"listeners"`
+	}
+	if err := json.Unmarshal([]byte(cfg.ValueString()), &doc); err != nil {
+		return out
+	}
+	for _, l := range doc.Listeners {
+		if l.Name != "" {
+			out[l.Name] = l.Protocol
+		}
+	}
+	return out
+}
+
+// refuseWithoutEnterpriseLicense adds a plan error when the gateway reports
+// no valid Enterprise license, which is the exact condition under which it
+// answers 403 to every sidecar route. A gateway that cannot be asked, or
+// one too old to report a license, is left to answer at apply.
+func refuseWithoutEnterpriseLicense(client *hoop.Client, resourceType string, diags *diag.Diagnostics) {
+	if client == nil {
+		return
+	}
+	check, err := client.CheckEnterpriseLicense()
+	if err != nil || check.Enterprise {
+		return
+	}
+	diags.AddError("Enterprise License Required",
+		fmt.Sprintf("%s needs a valid Enterprise license and the gateway reports that %s. "+
+			"Add the license under Settings > License and plan again.", resourceType, check.Reason))
+}
+
 // documentForWrite builds the document the gateway stores: the planned
 // configuration, or an empty object, with load_from_disk added when on.
-func documentForWrite(cfg jsontypes.Normalized, loadFromDisk bool) (json.RawMessage, error) {
+func documentForWrite(cfg sidecarConfigValue, loadFromDisk bool) (json.RawMessage, error) {
 	doc := map[string]json.RawMessage{}
 	if !cfg.IsNull() && !cfg.IsUnknown() {
 		if err := json.Unmarshal([]byte(cfg.ValueString()), &doc); err != nil {
@@ -219,10 +389,13 @@ func (r *sidecarResource) readSidecarInto(ctx context.Context, model *sidecarRes
 	// An empty document over an undeclared attribute stays null, so a sidecar
 	// registered without a configuration shows no diff.
 	if model.Configuration.IsNull() && string(doc) == "{}" {
-		model.Configuration = jsontypes.NewNormalizedNull()
+		model.Configuration = newSidecarConfigNull()
 	} else {
-		model.Configuration = jsontypes.NewNormalizedValue(string(doc))
+		model.Configuration = newSidecarConfigValue(string(doc))
 	}
+	var d diag.Diagnostics
+	model.BoundRules, d = boundRulesValue(ctx, sc)
+	diags.Append(d...)
 	model.Version = types.StringValue(sc.Version)
 	model.LastSeenAt = types.StringValue(sc.LastSeenAt)
 	model.ConfigState = types.StringValue(sc.ConfigState)

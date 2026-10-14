@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -23,16 +22,17 @@ func NewSidecarDataSource() datasource.DataSource {
 }
 
 type sidecarDataSourceModel struct {
-	ID              types.String         `tfsdk:"id"`
-	Name            types.String         `tfsdk:"name"`
-	Configuration   jsontypes.Normalized `tfsdk:"configuration"`
-	LoadFromDisk    types.Bool           `tfsdk:"load_from_disk"`
-	Version         types.String         `tfsdk:"version"`
-	LastSeenAt      types.String         `tfsdk:"last_seen_at"`
-	ConfigState     types.String         `tfsdk:"config_state"`
-	LastError       types.String         `tfsdk:"last_error"`
-	IdentityIssuer  types.String         `tfsdk:"identity_issuer"`
-	IdentitySubject types.String         `tfsdk:"identity_subject"`
+	ID              types.String       `tfsdk:"id"`
+	Name            types.String       `tfsdk:"name"`
+	Configuration   sidecarConfigValue `tfsdk:"configuration"`
+	LoadFromDisk    types.Bool         `tfsdk:"load_from_disk"`
+	Version         types.String       `tfsdk:"version"`
+	LastSeenAt      types.String       `tfsdk:"last_seen_at"`
+	ConfigState     types.String       `tfsdk:"config_state"`
+	LastError       types.String       `tfsdk:"last_error"`
+	IdentityIssuer  types.String       `tfsdk:"identity_issuer"`
+	IdentitySubject types.String       `tfsdk:"identity_subject"`
+	BoundRules      types.List         `tfsdk:"bound_rules"`
 }
 
 type sidecarDataSource struct {
@@ -58,7 +58,7 @@ func (d *sidecarDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			},
 			"configuration": schema.StringAttribute{
 				Description: "The stored configuration document, as JSON, without `load_from_disk`.",
-				CustomType:  jsontypes.NormalizedType{},
+				CustomType:  sidecarConfigType{},
 				Computed:    true,
 			},
 			"load_from_disk": schema.BoolAttribute{
@@ -89,6 +89,17 @@ func (d *sidecarDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Description: "The subject of the service account identity bound to this sidecar, if one reached it.",
 				Computed:    true,
 			},
+			"bound_rules": schema.ListNestedAttribute{
+				Description: "The rules the control plane folds into this sidecar's configuration, and the listener each lands on.",
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"kind":          schema.StringAttribute{Computed: true, Description: "`guardrail`, `datamasking` or `analyzer`."},
+						"name":          schema.StringAttribute{Computed: true, Description: "The rule name."},
+						"listener_name": schema.StringAttribute{Computed: true, Description: "The listener the rule is bound to; empty for the whole sidecar."},
+					},
+				},
+			},
 		},
 	}
 }
@@ -112,7 +123,7 @@ func (d *sidecarDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 	data.ID = types.StringValue(sc.ID)
 	data.Name = types.StringValue(sc.Name)
-	data.Configuration = jsontypes.NewNormalizedValue(string(doc))
+	data.Configuration = newSidecarConfigValue(string(doc))
 	data.LoadFromDisk = types.BoolValue(loadFromDisk)
 	data.Version = types.StringValue(sc.Version)
 	data.LastSeenAt = types.StringValue(sc.LastSeenAt)
@@ -120,6 +131,12 @@ func (d *sidecarDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	data.LastError = types.StringValue(sc.LastError)
 	data.IdentityIssuer = types.StringValue(sc.IdentityIssuer)
 	data.IdentitySubject = types.StringValue(sc.IdentitySubject)
+	bound, diags := boundRulesValue(ctx, sc)
+	resp.Diagnostics.Append(diags...)
+	data.BoundRules = bound
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 

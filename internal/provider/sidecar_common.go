@@ -5,10 +5,12 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -252,4 +254,28 @@ func fromApiString(prior types.String, value string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(value)
+}
+
+// warnOnUnbind adds a plan warning when a declared sidecar_targets is removed
+// from the configuration. The plan already shows the attribute going away;
+// this says what that does, because the write sends [] and the gateway
+// unbinds the rule from every listener it named.
+func warnOnUnbind(ctx context.Context, resourceType, name string, plan, prior types.List, diags *diag.Diagnostics) {
+	if !plan.IsNull() || prior.IsNull() || prior.IsUnknown() {
+		return
+	}
+	var targets []sidecarTargetModel
+	diags.Append(prior.ElementsAs(ctx, &targets, false)...)
+	if len(targets) == 0 {
+		return
+	}
+	sidecars := map[string]bool{}
+	for _, t := range targets {
+		sidecars[t.SidecarID.ValueString()] = true
+	}
+	diags.AddAttributeWarning(path.Root("sidecar_targets"), "Rule Will Be Unbound From Its Sidecars",
+		fmt.Sprintf("Removing sidecar_targets from %s %q unbinds it from %d listener(s) on %d sidecar(s). "+
+			"The sidecars stop enforcing the rule on their next heartbeat. "+
+			"Leave the attribute out of the configuration from the start to keep bindings Terraform does not manage.",
+			resourceType, name, len(targets), len(sidecars)))
 }

@@ -20,6 +20,7 @@ import (
 var (
 	_ resource.Resource                = &guardrailResource{}
 	_ resource.ResourceWithImportState = &guardrailResource{}
+	_ resource.ResourceWithModifyPlan  = &guardrailResource{}
 )
 
 func NewGuardrailResource() resource.Resource {
@@ -225,6 +226,21 @@ func (r *guardrailResource) Delete(ctx context.Context, req resource.DeleteReque
 		resp.Diagnostics.AddError("Error Deleting Guardrail",
 			fmt.Sprintf("Failed to delete guardrail %q: %v", state.Name.ValueString(), err))
 	}
+}
+
+// ModifyPlan warns when a declared sidecar_targets is removed, since the
+// write that follows unbinds the rule from every sidecar it named.
+func (r *guardrailResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+	var plan, state guardrailResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	warnOnUnbind(ctx, "hoop_guardrail", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 
 func (r *guardrailResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 )
 
 type HttpClient interface {
@@ -34,6 +35,11 @@ type Client struct {
 	authScheme AuthScheme
 	userAgent  string
 	httpClient HttpClient
+
+	// The license answer, read once per client. See CheckEnterpriseLicense.
+	licenseOnce sync.Once
+	license     LicenseCheck
+	licenseErr  error
 }
 
 func NewClient(apiURL, token string, opts ClientOptions) (*Client, error) {

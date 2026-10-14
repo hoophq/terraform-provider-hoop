@@ -23,6 +23,7 @@ import (
 var (
 	_ resource.Resource                = &sidecarServiceAccountResource{}
 	_ resource.ResourceWithImportState = &sidecarServiceAccountResource{}
+	_ resource.ResourceWithModifyPlan  = &sidecarServiceAccountResource{}
 )
 
 func NewSidecarServiceAccountResource() resource.Resource {
@@ -156,6 +157,15 @@ func (m *sidecarServiceAccountResourceModel) fromApi(sa *hoop.SidecarServiceAcco
 	} else {
 		m.JWKS = jsontypes.NewNormalizedValue(string(sa.JWKS))
 	}
+}
+
+// ModifyPlan refuses the plan when the gateway reports no valid Enterprise
+// license, the condition under which every service account route answers 403.
+func (r *sidecarServiceAccountResource) ModifyPlan(_ context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	refuseWithoutEnterpriseLicense(r.client, "hoop_sidecar_service_account", &resp.Diagnostics)
 }
 
 func (r *sidecarServiceAccountResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

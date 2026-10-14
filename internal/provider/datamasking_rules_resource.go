@@ -22,6 +22,7 @@ import (
 var (
 	_ resource.Resource                = &datamaskingRulesResource{}
 	_ resource.ResourceWithImportState = &datamaskingRulesResource{}
+	_ resource.ResourceWithModifyPlan  = &datamaskingRulesResource{}
 )
 
 // NewDatamaskingRulesResource is a helper function to simplify the provider implementation.
@@ -399,6 +400,21 @@ func (r *datamaskingRulesResource) Delete(ctx context.Context, req resource.Dele
 		)
 		return
 	}
+}
+
+// ModifyPlan warns when a declared sidecar_targets is removed, since the
+// write that follows unbinds the rule from every sidecar it named.
+func (r *datamaskingRulesResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return
+	}
+	var plan, state datamaskingRulesResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	warnOnUnbind(ctx, "hoop_datamasking_rules", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 
 func (r *datamaskingRulesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
