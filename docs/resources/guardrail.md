@@ -3,12 +3,12 @@
 page_title: "hoop_guardrail Resource - hoop"
 subcategory: ""
 description: |-
-  Manages a guardrail rule. On the gateway, input and output inspect the sessions of the connections in connection_ids. On a sidecar fleet, sidecar_spec is the rule in the sidecar's vocabulary and sidecar_targets names the listeners that enforce it.
+  Manages a guardrail rule. On the gateway, input and output inspect the sessions of the connections in connection_ids. On a sidecar fleet, sidecar_spec is the rule in the sidecar's vocabulary and sidecar_targets names the listeners that enforce it. The two halves are independent: a rule may have gateway connections, sidecar listeners, or both.
 ---
 
 # hoop_guardrail (Resource)
 
-Manages a guardrail rule. On the gateway, `input` and `output` inspect the sessions of the connections in `connection_ids`. On a sidecar fleet, `sidecar_spec` is the rule in the sidecar's vocabulary and `sidecar_targets` names the listeners that enforce it.
+Manages a guardrail rule. On the gateway, `input` and `output` inspect the sessions of the connections in `connection_ids`. On a sidecar fleet, `sidecar_spec` is the rule in the sidecar's vocabulary and `sidecar_targets` names the listeners that enforce it. The two halves are independent: a rule may have gateway connections, sidecar listeners, or both.
 
 ## Example Usage
 

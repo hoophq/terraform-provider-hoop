@@ -101,9 +101,13 @@ func (r *sidecarResource) Metadata(_ context.Context, req resource.MetadataReque
 func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Registers a sidecar with the control plane and owns the configuration it serves. " +
-			"The sidecar fetches that configuration on every heartbeat. Rules reach it through the " +
-			"`sidecar_targets` of `hoop_guardrail`, `hoop_datamasking_rules` and `hoop_ai_session_analyzer_rule`, " +
-			"not through this resource. Needs an Enterprise license.",
+			"The sidecar fetches that configuration on every heartbeat. Pass `token` to it as `HOOP_SIDECAR_TOKEN` " +
+			"next to `HOOP_CONTROL_PLANE_URL`, or `controlPlane.token` in the helm chart. " +
+			"Rules reach the sidecar through the `sidecar_targets` of `hoop_guardrail`, `hoop_datamasking_rules` " +
+			"and `hoop_ai_session_analyzer_rule`; `bound_rules` shows what reached it. " +
+			"A fleet whose pods identify themselves with a platform token uses `hoop_sidecar_service_account` and " +
+			"`data.hoop_sidecar` instead; the guide \"Managing a sidecar fleet with Terraform\" walks through both. " +
+			"Needs an Enterprise license, checked at plan.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the sidecar. Rule resources reference it in `sidecar_targets`.",

@@ -3,12 +3,12 @@
 page_title: "hoop_datamasking_rules Resource - hoop"
 subcategory: ""
 description: |-
-  Manages Datamasking Rules resources.
+  Manages a data masking rule. On the gateway it masks the sessions of connection_ids. On a sidecar fleet, sidecar_spec is the mask block a listener receives and sidecar_targets names the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.
 ---
 
 # hoop_datamasking_rules (Resource)
 
-Manages Datamasking Rules resources.
+Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.
 
 ## Example Usage
 

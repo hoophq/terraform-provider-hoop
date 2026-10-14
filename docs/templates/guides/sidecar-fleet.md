@@ -1,0 +1,199 @@
+---
+page_title: "Managing a sidecar fleet with Terraform"
+subcategory: ""
+---
+
+A hoop sidecar is a relay in front of a database or an API. It fetches its configuration from the control plane on every heartbeat, enforces the rules the control plane binds to it, and reports back what it is running. This guide takes a fleet from zero to enforced rules with Terraform alone, and shows what the plan catches before anything reaches a pod.
+
+Every resource here except the rules needs an Enterprise license on the organization. The plan tells you when it is missing.
+
+## Choose how sidecars authenticate
+
+| | Token | Platform identity |
+|---|---|---|
+| Resource | `hoop_sidecar` | `hoop_sidecar_service_account` |
+| Who creates the sidecar | Terraform | the control plane, on the pod's first handshake |
+| Secret in state | yes, the `token` attribute | none |
+| Per-sidecar work | one resource each | none; the name comes from a template |
+| Fits | a few long-lived sidecars, VMs, compose | Kubernetes and GCE fleets, autoscaled replicas |
+
+Both end in the same place: a sidecar id that rule resources bind to through `sidecar_targets`.
+
+## Platform identity, on GKE
+
+One mapping covers every pod that runs as the `hoop-sidecar` service account, in any namespace of the cluster. The subject pattern's `*` becomes the namespace, and `name_template` turns it into the sidecar name.
+
+```terraform
+resource "hoop_sidecar_service_account" "gke_eu" {
+  name            = "gke-eu"
+  issuer          = "https://container.googleapis.com/v1/projects/my-project/locations/europe-west1/clusters/eu"
+  audience        = "https://hoop.example.com"
+  claim           = "sub"
+  subject_pattern = "system:serviceaccount:*:hoop-sidecar"
+  name_template   = "gke-eu-{1}"
+}
+```
+
+`audience` is the control plane URL the sidecar uses. The issuer is the cluster's OIDC issuer; `kubectl get --raw /.well-known/openid-configuration | jq .issuer` prints it.
+
+Deploy the chart with `controlPlane.identity`. The chart mounts a projected token with that audience and the relay presents it on every request.
+
+```terraform
+resource "helm_release" "sidecar" {
+  name       = "hoopsidecar"
+  namespace  = "ws-123"
+  repository = "oci://ghcr.io/hoophq/helm-charts"
+  chart      = "hoopsidecar-chart"
+
+  values = [yamlencode({
+    controlPlane = {
+      url      = "https://hoop.example.com"
+      identity = "kubernetes"
+    }
+    serviceAccount = { create = true, name = "hoop-sidecar" }
+    laneServices = {
+      internal = { enabled = true, ports = [{ name = "postgres", port = 15432 }] }
+    }
+  })]
+
+  depends_on = [hoop_sidecar_service_account.gke_eu]
+}
+```
+
+The pod's first handshake creates the sidecar `gke-eu-ws-123`. It needs a document with listeners, and there are two places it can come from:
+
+- **The chart's `config` block.** A sidecar that finds an empty control plane seeds it with its own file, once. After that the control plane owns the document, and the file's listeners are ignored. This is the smallest change for a fleet that already runs from a ConfigMap.
+- **A `hoop_sidecar` resource.** Import the sidecar by name after the first handshake and declare `configuration`; Terraform owns the document from then on. `terraform import hoop_sidecar.ws_123 gke-eu-ws-123`.
+
+Either way, rule resources need the sidecar id. Read it by name:
+
+```terraform
+data "hoop_sidecar" "ws_123" {
+  name       = "gke-eu-ws-123"
+  depends_on = [helm_release.sidecar]
+}
+```
+
+A `data` block fails while the sidecar does not exist yet, so the first `terraform apply` after the deploy may need a retry while the pod comes up. Once the sidecar is there, `data.hoop_sidecar.ws_123.id` is stable across pod restarts, rollouts and replicas: they all land on the same sidecar.
+
+## Token, anywhere
+
+```terraform
+resource "hoop_sidecar" "payments" {
+  name = "payments"
+  configuration = jsonencode({
+    admin     = { listen = "0.0.0.0:19000" }
+    audit     = { file = "-" }
+    listeners = [{
+      name     = "appdb"
+      protocol = "postgres"
+      listen   = "0.0.0.0:15432"
+      upstream = "appdb.default.svc.cluster.local:5432"
+    }]
+  })
+}
+
+resource "helm_release" "payments" {
+  name       = "payments-sidecar"
+  repository = "oci://ghcr.io/hoophq/helm-charts"
+  chart      = "hoopsidecar-chart"
+
+  values = [yamlencode({
+    controlPlane = { url = "https://hoop.example.com" }
+  })]
+
+  set_sensitive {
+    name  = "controlPlane.token"
+    value = hoop_sidecar.payments.token
+  }
+}
+```
+
+The gateway shows the token once. It lives in Terraform state from then on, so treat the state as you treat the token.
+
+`configuration` is the sidecar's own config file as JSON. `jsonencode(yamldecode(file("sidecar.yaml")))` keeps the YAML you already have. Omit zero values or leave them in; the provider compares the way the gateway stores the document, so `""`, `0`, `false` and empty blocks do not show up as changes.
+
+## Bind rules to listeners
+
+Rules are their own resources, and each one names the listeners that enforce it. `sidecar_spec` is the rule in the sidecar's vocabulary; `sidecar_targets` is where it goes.
+
+```terraform
+resource "hoop_guardrail" "no_destructive" {
+  name = "no-destructive"
+
+  sidecar_spec = jsonencode({
+    rules = [{
+      name       = "no-destructive"
+      type       = "operation"
+      operations = ["delete", "drop", "truncate"]
+      message    = "destructive statements are not permitted on appdb"
+    }]
+  })
+
+  sidecar_targets = [
+    { sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" },
+    { sidecar_id = data.hoop_sidecar.ws_123.id },
+  ]
+}
+
+resource "hoop_datamasking_rules" "emails" {
+  name                   = "mask-emails"
+  description            = "Redact email addresses on the way back"
+  score_threshold        = 0.5
+  connection_ids         = []
+  custom_entity_types    = []
+  supported_entity_types = []
+
+  sidecar_spec = jsonencode({
+    rules = [{ name = "emails", entities = ["EMAIL_ADDRESS"], strategy = "redact" }]
+  })
+
+  sidecar_targets = [{ sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" }]
+}
+```
+
+An entry without `listener_name` binds every listener the sidecar has. The control plane folds bound rules into the document it serves, so the sidecar picks them up on its next heartbeat and nothing restarts.
+
+Three things about `sidecar_targets`:
+
+- Leave it out and Terraform leaves the bindings alone, including ones made in the control plane UI.
+- Declare it and Terraform owns the set. Removing the attribute later sends an empty set, and the plan warns with the number of listeners the rule leaves.
+- A masking rule bound to a listener replaces that listener's mask block. Two masking rules on one listener is last writer wins; keep one per listener. Two analyzer rules on one listener is refused.
+
+## Watch the fleet converge
+
+`hoop_sidecar` and `data.hoop_sidecar` report what each sidecar runs:
+
+```terraform
+output "payments_state" {
+  value = {
+    config_state = hoop_sidecar.payments.config_state
+    version      = hoop_sidecar.payments.version
+    last_error   = hoop_sidecar.payments.last_error
+    bound_rules  = hoop_sidecar.payments.bound_rules
+  }
+}
+```
+
+`config_state` is `applied` when the sidecar runs the stored document, `applying` for a heartbeat after a change, `not_applied` when it stopped reporting, `refused` when it rejected the document (`last_error` says why), and `not_served` when the control plane refused to serve it to that build. A plan never changes because of these fields.
+
+## What the plan catches
+
+| You do | What happens |
+|---|---|
+| Plan `hoop_sidecar` on an organization without an Enterprise license | `Error: Enterprise License Required`, before any apply |
+| Rename or remove a listener a rule is bound to | `Error: Listener Change Breaks Bound Rules`, naming the rules. Update their `sidecar_targets` first, or bind them with an empty `listener_name` |
+| Change a bound listener's protocol | the same error; a rule type the new protocol cannot run would be refused by the gateway |
+| Put `load_from_disk` inside `configuration` | an error pointing at the attribute, which routes the change through the call the gateway requires |
+| Remove `sidecar_targets` from a rule | a warning with the listener and sidecar counts |
+
+## Import an existing fleet
+
+```shell
+terraform import hoop_sidecar.payments payments                       # by name or id
+terraform import hoop_sidecar_service_account.gke_eu <uuid>
+terraform import hoop_guardrail.no_destructive <uuid>
+terraform import hoop_ai_session_analyzer_rule.appdb appdb-analysis   # by name
+```
+
+An imported `hoop_sidecar` has no `token`; the gateway cannot return it. An imported rule has null `sidecar_targets` and `sidecar_spec` in state until the configuration declares them.

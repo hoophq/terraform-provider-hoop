@@ -56,7 +56,8 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		Description: "Manages a guardrail rule. On the gateway, `input` and `output` inspect the sessions of the " +
 			"connections in `connection_ids`. On a sidecar fleet, `sidecar_spec` is the rule in the sidecar's " +
-			"vocabulary and `sidecar_targets` names the listeners that enforce it.",
+			"vocabulary and `sidecar_targets` names the listeners that enforce it. The two halves are independent: " +
+			"a rule may have gateway connections, sidecar listeners, or both.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",

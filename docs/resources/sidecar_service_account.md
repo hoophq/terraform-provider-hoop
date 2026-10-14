@@ -3,12 +3,12 @@
 page_title: "hoop_sidecar_service_account Resource - hoop"
 subcategory: ""
 description: |-
-  Lets sidecars authenticate with a token their platform issued, a Kubernetes projected service account token or a Google ID token, instead of a token the control plane issued per sidecar. A matching token reaches the sidecar name_template names, and the control plane creates that sidecar on its first handshake. Use data.hoop_sidecar to bind rules to a sidecar created this way. Needs an Enterprise license.
+  Lets sidecars authenticate with a token their platform issued, a Kubernetes projected service account token or a Google ID token, instead of a token the control plane issued per sidecar. A matching token reaches the sidecar name_template names, and the control plane creates that sidecar on its first handshake. Use data.hoop_sidecar to bind rules to a sidecar created this way. Needs an Enterprise license, checked at plan.
 ---
 
 # hoop_sidecar_service_account (Resource)
 
-Lets sidecars authenticate with a token their platform issued, a Kubernetes projected service account token or a Google ID token, instead of a token the control plane issued per sidecar. A matching token reaches the sidecar `name_template` names, and the control plane creates that sidecar on its first handshake. Use `data.hoop_sidecar` to bind rules to a sidecar created this way. Needs an Enterprise license.
+Lets sidecars authenticate with a token their platform issued, a Kubernetes projected service account token or a Google ID token, instead of a token the control plane issued per sidecar. A matching token reaches the sidecar `name_template` names, and the control plane creates that sidecar on its first handshake. Use `data.hoop_sidecar` to bind rules to a sidecar created this way. Needs an Enterprise license, checked at plan.
 
 ## Example Usage
 

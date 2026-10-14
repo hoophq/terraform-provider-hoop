@@ -3,12 +3,12 @@
 page_title: "hoop_sidecar Resource - hoop"
 subcategory: ""
 description: |-
-  Registers a sidecar with the control plane and owns the configuration it serves. The sidecar fetches that configuration on every heartbeat. Rules reach it through the sidecar_targets of hoop_guardrail, hoop_datamasking_rules and hoop_ai_session_analyzer_rule, not through this resource. Needs an Enterprise license.
+  Registers a sidecar with the control plane and owns the configuration it serves. The sidecar fetches that configuration on every heartbeat. Pass token to it as HOOP_SIDECAR_TOKEN next to HOOP_CONTROL_PLANE_URL, or controlPlane.token in the helm chart. Rules reach the sidecar through the sidecar_targets of hoop_guardrail, hoop_datamasking_rules and hoop_ai_session_analyzer_rule; bound_rules shows what reached it. A fleet whose pods identify themselves with a platform token uses hoop_sidecar_service_account and data.hoop_sidecar instead; the guide "Managing a sidecar fleet with Terraform" walks through both. Needs an Enterprise license, checked at plan.
 ---
 
 # hoop_sidecar (Resource)
 
-Registers a sidecar with the control plane and owns the configuration it serves. The sidecar fetches that configuration on every heartbeat. Rules reach it through the `sidecar_targets` of `hoop_guardrail`, `hoop_datamasking_rules` and `hoop_ai_session_analyzer_rule`, not through this resource. Needs an Enterprise license.
+Registers a sidecar with the control plane and owns the configuration it serves. The sidecar fetches that configuration on every heartbeat. Pass `token` to it as `HOOP_SIDECAR_TOKEN` next to `HOOP_CONTROL_PLANE_URL`, or `controlPlane.token` in the helm chart. Rules reach the sidecar through the `sidecar_targets` of `hoop_guardrail`, `hoop_datamasking_rules` and `hoop_ai_session_analyzer_rule`; `bound_rules` shows what reached it. A fleet whose pods identify themselves with a platform token uses `hoop_sidecar_service_account` and `data.hoop_sidecar` instead; the guide "Managing a sidecar fleet with Terraform" walks through both. Needs an Enterprise license, checked at plan.
 
 ## Example Usage
 

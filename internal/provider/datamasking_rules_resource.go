@@ -56,7 +56,9 @@ func (r *datamaskingRulesResource) Metadata(_ context.Context, req resource.Meta
 // Schema defines the schema for the data source.
 func (r *datamaskingRulesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages Datamasking Rules resources.",
+		Description: "Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. " +
+			"On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names " +
+			"the listeners. A listener's mask block replaces its defaults, so bind one masking rule per listener.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",
