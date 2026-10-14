@@ -203,13 +203,16 @@ func TestAPIErrorHints(t *testing.T) {
 // Fixtures shared by the endpoint table. The git URL is hashed into the request
 // path by the runbook endpoints, so the expectation derives it the same way.
 const (
-	testAPIURL     = "http://localhost:8009/api"
-	testConnName   = "pgdemo"
-	testUserEmail  = "john@hoop.dev"
-	testPluginName = "runbooks"
-	testConnID     = "conn-id"
-	testRuleID     = "rule-id"
-	testGitURL     = "https://github.com/hoophq/runbooks.git"
+	testAPIURL      = "http://localhost:8009/api"
+	testConnName    = "pgdemo"
+	testUserEmail   = "john@hoop.dev"
+	testPluginName  = "runbooks"
+	testConnID      = "conn-id"
+	testRuleID      = "rule-id"
+	testGitURL      = "https://github.com/hoophq/runbooks.git"
+	testSidecarName = "payments-sidecar"
+	testSAID        = "sa-id"
+	testRuleName    = "block-dangerous-queries"
 )
 
 func testRunbookRepoID() string {
@@ -301,6 +304,48 @@ func clientEndpoints() []endpointCall {
 			[]string{"PUT /api/runbooks/rules/" + testRuleID}},
 		{"DeleteRunbookRuleByID", func(c *Client) { _ = c.DeleteRunbookRuleByID(testRuleID) },
 			[]string{"DELETE /api/runbooks/rules/" + testRuleID}},
+
+		{"CreateSidecar", func(c *Client) { _, _ = c.CreateSidecar(testSidecarName, nil) },
+			[]string{"POST /api/sidecars"}},
+		{"GetSidecar", func(c *Client) { _, _ = c.GetSidecar(testSidecarName) },
+			[]string{"GET /api/sidecars/" + testSidecarName}},
+		{"UpdateSidecarConfiguration", func(c *Client) { _, _ = c.UpdateSidecarConfiguration(testSidecarName, nil) },
+			[]string{"PUT /api/sidecars/" + testSidecarName}},
+		{"PatchSidecarConfiguration", func(c *Client) { _, _ = c.PatchSidecarConfiguration(testSidecarName, nil) },
+			[]string{"PATCH /api/sidecars/" + testSidecarName}},
+		{"DeleteSidecar", func(c *Client) { _ = c.DeleteSidecar(testSidecarName) },
+			[]string{"DELETE /api/sidecars/" + testSidecarName}},
+		{"GetSidecarSlackChannels", func(c *Client) { _, _ = c.GetSidecarSlackChannels(testSidecarName) },
+			[]string{"GET /api/sidecars/" + testSidecarName + "/slack-channels"}},
+		{"SetSidecarSlackChannels", func(c *Client) { _, _ = c.SetSidecarSlackChannels(testSidecarName, nil) },
+			[]string{"PUT /api/sidecars/" + testSidecarName + "/slack-channels"}},
+
+		{"CreateSidecarServiceAccount", func(c *Client) { _, _ = c.CreateSidecarServiceAccount(SidecarServiceAccount{}) },
+			[]string{"POST /api/sidecar-service-accounts"}},
+		{"GetSidecarServiceAccount", func(c *Client) { _, _ = c.GetSidecarServiceAccount(testSAID) },
+			[]string{"GET /api/sidecar-service-accounts/" + testSAID}},
+		{"UpdateSidecarServiceAccount", func(c *Client) { _, _ = c.UpdateSidecarServiceAccount(SidecarServiceAccount{ID: testSAID}) },
+			[]string{"PUT /api/sidecar-service-accounts/" + testSAID}},
+		{"DeleteSidecarServiceAccount", func(c *Client) { _ = c.DeleteSidecarServiceAccount(testSAID) },
+			[]string{"DELETE /api/sidecar-service-accounts/" + testSAID}},
+
+		{"CreateGuardRailRule", func(c *Client) { _, _ = c.CreateGuardRailRule(GuardRailRule{}) },
+			[]string{"POST /api/guardrails"}},
+		{"GetGuardRailRule", func(c *Client) { _, _ = c.GetGuardRailRule(testRuleID) },
+			[]string{"GET /api/guardrails/" + testRuleID}},
+		{"UpdateGuardRailRule", func(c *Client) { _, _ = c.UpdateGuardRailRule(GuardRailRule{ID: testRuleID}) },
+			[]string{"PUT /api/guardrails/" + testRuleID}},
+		{"DeleteGuardRailRule", func(c *Client) { _ = c.DeleteGuardRailRule(testRuleID) },
+			[]string{"DELETE /api/guardrails/" + testRuleID}},
+
+		{"CreateAnalyzerRule", func(c *Client) { _, _ = c.CreateAnalyzerRule(AnalyzerRule{}) },
+			[]string{"POST /api/ai/session-analyzer/rules"}},
+		{"GetAnalyzerRule", func(c *Client) { _, _ = c.GetAnalyzerRule(testRuleName) },
+			[]string{"GET /api/ai/session-analyzer/rules/" + testRuleName}},
+		{"UpdateAnalyzerRule", func(c *Client) { _, _ = c.UpdateAnalyzerRule(AnalyzerRule{Name: testRuleName}) },
+			[]string{"PUT /api/ai/session-analyzer/rules/" + testRuleName}},
+		{"DeleteAnalyzerRule", func(c *Client) { _ = c.DeleteAnalyzerRule(testRuleName) },
+			[]string{"DELETE /api/ai/session-analyzer/rules/" + testRuleName}},
 	}
 }
 

@@ -17,6 +17,12 @@ type DataMaskingRule struct {
 	ConnectionIDs        []string                    `json:"connection_ids"`
 	SupportedEntityTypes []SupportedEntityTypesEntry `json:"supported_entity_types"`
 	CustomEntityTypes    []CustomEntityTypesEntry    `json:"custom_entity_types"`
+	// SidecarSpec is the rule in the sidecar's vocabulary, the mask block a
+	// listener receives. Nil keeps what the gateway stores; an explicit JSON
+	// null clears it.
+	SidecarSpec json.RawMessage `json:"sidecar_spec,omitempty"`
+	// SidecarTargets follows the gateway's three-way reading; see the type.
+	SidecarTargets SidecarTargets `json:"sidecar_targets,omitempty"`
 }
 
 type SupportedEntityTypesEntry struct {

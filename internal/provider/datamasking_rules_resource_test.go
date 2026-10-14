@@ -177,3 +177,64 @@ resource "hoop_datamasking_rules" "rule1" {
 		},
 	})
 }
+
+// TestDataMaskingRulesResourceSidecarBinding covers the sidecar fields on a
+// gateway that keeps bindings when the request leaves the key out. The fake
+// above replaces the whole record and cannot show the difference.
+func TestDataMaskingRulesResourceSidecarBinding(t *testing.T) {
+	gw := newFakeRuleGateway("/datamasking-rules", false)
+	base := `
+resource "hoop_datamasking_rules" "pii" {
+  name                   = "mask-pii"
+  score_threshold        = 0.5
+  connection_ids         = []
+  custom_entity_types    = []
+  supported_entity_types = [{ name = "PII", entity_types = ["EMAIL_ADDRESS"] }]
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testProviderBlock + base + `
+  description     = "mask pii on the appdb lane"
+  sidecar_spec    = jsonencode({ rules = [{ name = "emails", entities = ["EMAIL_ADDRESS"], strategy = "redact" }] })
+  sidecar_targets = [{ sidecar_id = "sc-1", listener_name = "appdb" }]
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("hoop_datamasking_rules.pii", "sidecar_targets.0.sidecar_id", "sc-1"),
+					checkLastBody(gw.rec, "POST", "/datamasking-rules", map[string]string{
+						"sidecar_spec":    `{"rules":[{"name":"emails","entities":["EMAIL_ADDRESS"],"strategy":"redact"}]}`,
+						"sidecar_targets": `[{"sidecar_id":"sc-1","listener_name":"appdb"}]`,
+					}),
+					resetRecorder(gw.rec),
+				),
+			},
+			{
+				Config: testProviderBlock + base + `
+  description = "mask pii on the appdb lane"
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("hoop_datamasking_rules.pii", "sidecar_targets"),
+					resource.TestCheckNoResourceAttr("hoop_datamasking_rules.pii", "sidecar_spec"),
+					checkLastBody(gw.rec, "PUT", "/datamasking-rules/rule-1", map[string]string{
+						"sidecar_spec":    `null`,
+						"sidecar_targets": `[]`,
+					}),
+					resetRecorder(gw.rec),
+				),
+			},
+			{
+				Config: testProviderBlock + base + `
+  description = "reworded"
+}`,
+				Check: checkLastBody(gw.rec, "PUT", "/datamasking-rules/rule-1", map[string]string{
+					"sidecar_spec":    "<absent>",
+					"sidecar_targets": "<absent>",
+				}),
+			},
+		},
+	})
+}

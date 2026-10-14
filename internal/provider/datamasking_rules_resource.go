@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -30,13 +31,15 @@ func NewDatamaskingRulesResource() resource.Resource {
 
 // datamaskingRulesResourceModel maps the data source schema data.
 type datamaskingRulesResourceModel struct {
-	ID                   types.String  `tfsdk:"id"`
-	Name                 types.String  `tfsdk:"name"`
-	Description          types.String  `tfsdk:"description"`
-	ScoreThreshold       types.Float64 `tfsdk:"score_threshold"`
-	SupportedEntityTypes types.List    `tfsdk:"supported_entity_types"`
-	CustomEntityTypes    types.List    `tfsdk:"custom_entity_types"`
-	ConnectionIDs        types.List    `tfsdk:"connection_ids"`
+	ID                   types.String         `tfsdk:"id"`
+	Name                 types.String         `tfsdk:"name"`
+	Description          types.String         `tfsdk:"description"`
+	ScoreThreshold       types.Float64        `tfsdk:"score_threshold"`
+	SupportedEntityTypes types.List           `tfsdk:"supported_entity_types"`
+	CustomEntityTypes    types.List           `tfsdk:"custom_entity_types"`
+	ConnectionIDs        types.List           `tfsdk:"connection_ids"`
+	SidecarSpec          jsontypes.Normalized `tfsdk:"sidecar_spec"`
+	SidecarTargets       types.List           `tfsdk:"sidecar_targets"`
 }
 
 // datamaskingRulesResource is the data source implementation.
@@ -125,6 +128,8 @@ func (r *datamaskingRulesResource) Schema(_ context.Context, _ resource.SchemaRe
 				Description: "List of connection IDs which this rule applies to.",
 				Required:    true,
 			},
+			"sidecar_spec":    sidecarSpecAttribute(),
+			"sidecar_targets": sidecarTargetsAttribute(),
 		},
 	}
 }
@@ -170,12 +175,25 @@ func (r *datamaskingRulesResource) Read(ctx context.Context, req resource.ReadRe
 	currentState.Name = types.StringValue(rule.Name)
 	currentState.Description = types.StringValue(rule.Description)
 	currentState.ScoreThreshold = types.Float64Value(ptrToFloat64(rule.ScoreThreshold))
-	currentState.ConnectionIDs, diags = types.ListValueFrom(ctx, types.StringType, rule.ConnectionIDs)
+	// The gateway answers null for a rule with no connections, and the
+	// attribute is required, so the configuration spells that as []. Reading
+	// null into state would plan a change on every run of a sidecar-only rule.
+	connectionIDs := rule.ConnectionIDs
+	if connectionIDs == nil {
+		connectionIDs = []string{}
+	}
+	currentState.ConnectionIDs, diags = types.ListValueFrom(ctx, types.StringType, connectionIDs)
 	if diags.HasError() {
 		resp.Diagnostics.AddError(
 			"Error Converting Connection IDs",
 			fmt.Sprintf("Failed to convert connection IDs: %v", diags),
 		)
+		return
+	}
+	currentState.SidecarSpec = fromApiJSON(currentState.SidecarSpec, rule.SidecarSpec)
+	currentState.SidecarTargets, diags = fromApiSidecarTargets(ctx, currentState.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -230,6 +248,12 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 		}
 	}
 
+	sidecarTargets, diags := toApiSidecarTargets(ctx, plan.SidecarTargets, types.ListNull(sidecarTargetObjectType))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	rule, err := r.client.CreateDatamaskingRule(hoop.DataMaskingRule{
 		ID:                   plan.ID.ValueString(),
 		Name:                 plan.Name.ValueString(),
@@ -238,6 +262,8 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 		ConnectionIDs:        connectionIDs,
 		SupportedEntityTypes: supportedEntityTypeItems,
 		CustomEntityTypes:    customEntityTypeItems,
+		SidecarSpec:          toApiJSON(plan.SidecarSpec, jsontypes.NewNormalizedNull()),
+		SidecarTargets:       sidecarTargets,
 	})
 
 	if err != nil {
@@ -249,6 +275,12 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 	}
 
 	plan.ID = types.StringValue(rule.ID)
+	plan.SidecarSpec = fromApiJSON(plan.SidecarSpec, rule.SidecarSpec)
+	plan.SidecarTargets, diags = fromApiSidecarTargets(ctx, plan.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, &plan)
@@ -302,6 +334,17 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		}
 	}
 
+	var state datamaskingRulesResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	sidecarTargets, diags := toApiSidecarTargets(ctx, plan.SidecarTargets, state.SidecarTargets)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	rule, err := r.client.UpdateDatamaskingRule(hoop.DataMaskingRule{
 		ID:                   plan.ID.ValueString(),
 		Name:                 plan.Name.ValueString(),
@@ -310,6 +353,8 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		ConnectionIDs:        connectionIDs,
 		SupportedEntityTypes: supportedEntityTypeItems,
 		CustomEntityTypes:    customEntityTypeItems,
+		SidecarSpec:          toApiJSON(plan.SidecarSpec, state.SidecarSpec),
+		SidecarTargets:       sidecarTargets,
 	})
 
 	if err != nil {
@@ -324,6 +369,12 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 	plan.Name = types.StringValue(rule.Name)
 	plan.Description = types.StringValue(rule.Description)
 	plan.ScoreThreshold = types.Float64Value(*rule.ScoreThreshold)
+	plan.SidecarSpec = fromApiJSON(plan.SidecarSpec, rule.SidecarSpec)
+	plan.SidecarTargets, diags = fromApiSidecarTargets(ctx, plan.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

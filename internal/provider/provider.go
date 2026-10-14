@@ -200,7 +200,11 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 }
 
 // DataSources defines the data sources implemented in the provider.
-func (p *hoopProvider) DataSources(_ context.Context) []func() datasource.DataSource { return nil }
+func (p *hoopProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		NewSidecarDataSource,
+	}
+}
 
 // Resources defines the resources implemented in the provider.
 func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
@@ -212,5 +216,9 @@ func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewRunbookConfigurationResource,
 		NewRunbookRulesResource,
 		NewUserResource,
+		NewSidecarResource,
+		NewSidecarServiceAccountResource,
+		NewGuardrailResource,
+		NewAnalyzerRuleResource,
 	}
 }

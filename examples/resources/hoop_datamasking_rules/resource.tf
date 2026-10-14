@@ -61,3 +61,25 @@ resource "hoop_datamasking_rules" "rule2" {
     }
   ]
 }
+
+# Data Masking Rule distributed to a sidecar listener. sidecar_spec is the
+# mask block in the sidecar's own vocabulary and replaces the listener's
+# defaults; sidecar_targets names the listeners that apply it.
+resource "hoop_datamasking_rules" "rule3" {
+  name                   = "Mask customer emails on appdb"
+  description            = "Redact email addresses returned by the appdb lane."
+  score_threshold        = 0.5
+  connection_ids         = []
+  custom_entity_types    = []
+  supported_entity_types = []
+
+  sidecar_spec = jsonencode({
+    rules = [
+      { name = "emails", entities = ["EMAIL_ADDRESS"], strategy = "redact" }
+    ]
+  })
+
+  sidecar_targets = [
+    { sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" }
+  ]
+}
