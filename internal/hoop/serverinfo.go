@@ -40,9 +40,13 @@ func (c *Client) GetServerInfo() (*ServerInfo, error) {
 }
 
 // LicenseCheck is the answer to "will the gateway serve the Enterprise
-// routes". Reason is empty when Enterprise is true.
+// routes". Unknown is true when the gateway answered /serverinfo without a
+// license_info field, which a build from before that field does; the
+// gateway then decides at apply. Reason is set when Enterprise is false and
+// the answer is known.
 type LicenseCheck struct {
 	Enterprise bool
+	Unknown    bool
 	Reason     string
 }
 
@@ -67,7 +71,7 @@ func (c *Client) CheckEnterpriseLicense() (LicenseCheck, error) {
 func licenseCheckOf(info *ServerLicenseInfo) LicenseCheck {
 	switch {
 	case info == nil:
-		return LicenseCheck{Reason: "the organization has no license"}
+		return LicenseCheck{Unknown: true}
 	case info.Type != "enterprise":
 		return LicenseCheck{Reason: fmt.Sprintf("the organization's license is of type %q", info.Type)}
 	case !info.IsValid:

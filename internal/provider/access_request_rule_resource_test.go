@@ -139,6 +139,25 @@ func TestAccessRequestRuleResourceValidation(t *testing.T) {
   attributes       = []
   reviewers_groups = ["sre"]
   min_approvals    = 1`, `Connection Rule Gates Nothing`},
+		{"connection rule with both lists omitted", `
+  access_type      = "command"
+  reviewers_groups = ["sre"]
+  min_approvals    = 1`, `Connection Rule Gates Nothing`},
+		{"connection rule without reviewers", `
+  access_type      = "jit"
+  connection_names = ["pg-prod"]
+  min_approvals    = 1`, `Connection Rule Needs Reviewers`},
+		{"connection rule without approvals", `
+  access_type      = "jit"
+  connection_names = ["pg-prod"]
+  reviewers_groups = ["sre"]`, `Connection Rule Needs Approvals`},
+		{"skip review with required groups", `
+  access_type              = "jit"
+  connection_names         = ["pg-prod"]
+  reviewers_groups         = ["sre"]
+  min_approvals            = 1
+  approval_required_groups = ["dev"]
+  skip_review_groups       = ["sre"]`, `Skip Review Needs No Required Groups`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resource.ParallelTest(t, resource.TestCase{

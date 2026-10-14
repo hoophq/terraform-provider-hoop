@@ -23,9 +23,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &analyzerRuleResource{}
-	_ resource.ResourceWithImportState = &analyzerRuleResource{}
-	_ resource.ResourceWithModifyPlan  = &analyzerRuleResource{}
+	_ resource.Resource                   = &analyzerRuleResource{}
+	_ resource.ResourceWithImportState    = &analyzerRuleResource{}
+	_ resource.ResourceWithModifyPlan     = &analyzerRuleResource{}
+	_ resource.ResourceWithValidateConfig = &analyzerRuleResource{}
 )
 
 func NewAnalyzerRuleResource() resource.Resource {
@@ -182,6 +183,44 @@ func (r *analyzerRuleResource) Schema(_ context.Context, _ resource.SchemaReques
 				Validators:  reviewTTLValidator,
 			},
 		},
+	}
+}
+
+// ValidateConfig applies the gateway's rule for a risk tier
+// (gateway/api/ai/ai.go validateRiskTier) at plan: require_access_request
+// needs access_request_rule_name, every other action refuses it. Whether the
+// named rule exists is still the gateway's to say.
+func (r *analyzerRuleResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data analyzerRuleResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() || data.RiskEvaluation.IsNull() || data.RiskEvaluation.IsUnknown() {
+		return
+	}
+	var eval riskEvaluationModel
+	resp.Diagnostics.Append(data.RiskEvaluation.As(ctx, &eval, basetypesObjectAsOptions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for level, obj := range map[string]types.Object{"low_risk": eval.LowRisk, "medium_risk": eval.MediumRisk, "high_risk": eval.HighRisk} {
+		if obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		var tier riskTierModel
+		resp.Diagnostics.Append(obj.As(ctx, &tier, basetypesObjectAsOptions)...)
+		if resp.Diagnostics.HasError() || tier.Action.IsUnknown() || tier.AccessRequestRuleName.IsUnknown() {
+			continue
+		}
+		named := !tier.AccessRequestRuleName.IsNull() && tier.AccessRequestRuleName.ValueString() != ""
+		switch {
+		case tier.Action.ValueString() == "require_access_request" && !named:
+			resp.Diagnostics.AddAttributeError(path.Root("risk_evaluation").AtName(level).AtName("access_request_rule_name"),
+				"Access Request Rule Required",
+				fmt.Sprintf("%s: action require_access_request needs access_request_rule_name, the rule that supplies the approver groups.", level))
+		case tier.Action.ValueString() != "require_access_request" && named:
+			resp.Diagnostics.AddAttributeError(path.Root("risk_evaluation").AtName(level).AtName("access_request_rule_name"),
+				"Access Request Rule Not Allowed",
+				fmt.Sprintf("%s: access_request_rule_name is only allowed when action is require_access_request.", level))
+		}
 	}
 }
 

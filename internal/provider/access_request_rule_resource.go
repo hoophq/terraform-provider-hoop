@@ -163,18 +163,52 @@ func (r *accessRequestRuleResource) ValidateConfig(ctx context.Context, req reso
 		return
 	}
 	sidecar := data.AccessType.ValueString() == accessTypeSidecar
-	known := func(l types.List) bool { return !l.IsNull() && !l.IsUnknown() }
-	switch {
-	case sidecar && known(data.ConnectionNames) && len(data.ConnectionNames.Elements()) > 0:
-		resp.Diagnostics.AddAttributeError(path.Root("connection_names"), "Sidecar Rule Gates No Connection",
-			"A rule with access_type sidecar is named by analyzer rules through approval_rule and refuses connection_names.")
-	case !sidecar && (!data.PendingTTLSec.IsNull() || !data.ApprovalTTLSec.IsNull()):
+	// A null list is an empty one on the wire; only an unknown list defers
+	// the check to apply.
+	count := func(l types.List) (n int, known bool) {
+		if l.IsUnknown() {
+			return 0, false
+		}
+		if l.IsNull() {
+			return 0, true
+		}
+		return len(l.Elements()), true
+	}
+	connections, connectionsKnown := count(data.ConnectionNames)
+	attributes, attributesKnown := count(data.Attributes)
+	reviewers, reviewersKnown := count(data.ReviewersGroups)
+	required, requiredKnown := count(data.ApprovalRequiredGroups)
+	skip, skipKnown := count(data.SkipReviewGroups)
+
+	if sidecar {
+		if connectionsKnown && connections > 0 {
+			resp.Diagnostics.AddAttributeError(path.Root("connection_names"), "Sidecar Rule Gates No Connection",
+				"A rule with access_type sidecar is named by analyzer rules through approval_rule and refuses connection_names.")
+		}
+		return
+	}
+	// What gateway/api/accessrequests/rules.go validateAccessRequestRuleBody
+	// refuses for a connection rule, named at plan instead of at apply.
+	if !data.PendingTTLSec.IsNull() || !data.ApprovalTTLSec.IsNull() {
 		resp.Diagnostics.AddAttributeError(path.Root("pending_ttl_sec"), "Review Limits Are For Sidecar Rules",
 			"pending_ttl_sec and approval_ttl_sec apply to access_type sidecar. The gateway drops them on a connection rule, and the plan would never converge.")
-	case !sidecar && known(data.ConnectionNames) && known(data.Attributes) &&
-		len(data.ConnectionNames.Elements()) == 0 && len(data.Attributes.Elements()) == 0:
+	}
+	if connectionsKnown && attributesKnown && connections == 0 && attributes == 0 {
 		resp.Diagnostics.AddAttributeError(path.Root("connection_names"), "Connection Rule Gates Nothing",
 			"A rule with access_type jit, command or jit_command needs connection_names or attributes.")
+	}
+	if reviewersKnown && reviewers == 0 {
+		resp.Diagnostics.AddAttributeError(path.Root("reviewers_groups"), "Connection Rule Needs Reviewers",
+			"A rule with access_type jit, command or jit_command needs at least one group in reviewers_groups.")
+	}
+	allMustApprove := !data.AllGroupsMustApprove.IsUnknown() && data.AllGroupsMustApprove.ValueBool()
+	if !allMustApprove && !data.AllGroupsMustApprove.IsUnknown() && data.MinApprovals.IsNull() {
+		resp.Diagnostics.AddAttributeError(path.Root("min_approvals"), "Connection Rule Needs Approvals",
+			"Set min_approvals to at least 1, or all_groups_must_approve = true.")
+	}
+	if skipKnown && requiredKnown && skip > 0 && required > 0 {
+		resp.Diagnostics.AddAttributeError(path.Root("skip_review_groups"), "Skip Review Needs No Required Groups",
+			"skip_review_groups is only honored when approval_required_groups is empty.")
 	}
 }
 

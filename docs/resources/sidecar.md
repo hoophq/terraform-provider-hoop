@@ -39,11 +39,8 @@ resource "hoop_sidecar" "payments" {
   }
 }
 
-# The same document kept in a YAML file next to the Terraform code.
-resource "hoop_sidecar" "reporting" {
-  name          = "reporting"
-  configuration = jsonencode(yamldecode(file("${path.module}/reporting-sidecar.yaml")))
-}
+# A document kept as the YAML file you already deploy converts with
+#   configuration = jsonencode(yamldecode(file("${path.module}/sidecar.yaml")))
 
 output "payments_sidecar_token" {
   value     = hoop_sidecar.payments.token
@@ -62,7 +59,7 @@ output "payments_sidecar_token" {
 
 - `configuration` (String) The sidecar configuration document as a JSON object, in the schema of the sidecar config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file("sidecar.yaml")))` converts an existing file. The gateway drops zero values from the stored document; the plan compares past them, so `""`, `0`, `false` and empty blocks are harmless. Omit the attribute to store an empty document; the sidecar then refuses to start until one is set. Do not put `load_from_disk` here; use the attribute.
 - `load_from_disk` (Boolean) When true the sidecar runs its own config file and the control plane serves only the license. A switch in either direction detaches every rule bound to the sidecar: rules imported from its file that nothing else uses are deleted, the rest unbound. The plan warns, the apply lists them. Switching it off also clears the stored document before `configuration` is written.
-- `slack_channels` (Map of List of String) Slack channel ids per listener name, where that listener's reviews are posted. A listener left out uses the organization's default channel. Leave the attribute out to keep channels set outside Terraform; removing a declared value clears every listener it named.
+- `slack_channels` (Map of List of String) Slack channel ids per listener name, where that listener's reviews are posted. Every key must be a listener of `configuration`, with at least one channel. A listener left out uses the organization's default channel. Leave the attribute out to keep channels set outside Terraform; removing a declared value clears every listener it named.
 
 ### Read-Only
 

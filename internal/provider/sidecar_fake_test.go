@@ -154,6 +154,9 @@ type fakeSidecarGateway struct {
 	channels map[string]map[string][]string
 	nextID   int
 	license  fakeLicense
+	// failSlack makes every slack channel write answer 500, the failure a
+	// plan cannot see coming.
+	failSlack bool
 }
 
 // bind records a rule binding the way the rule API would, so the next read
@@ -216,22 +219,43 @@ func storedDocument(raw json.RawMessage) json.RawMessage {
 
 // fakeLicense answers /serverinfo. The zero value reports a valid Enterprise
 // license, which is what every test needs unless it is about the license.
+// none answers no license_info at all, the shape of a gateway from before
+// the field.
 type fakeLicense struct {
 	typ    string
 	valid  bool
 	status string
 	set    bool
+	none   bool
 }
 
 func (l *fakeLicense) serve(req *http.Request) *http.Response {
 	if !strings.HasSuffix(req.URL.Path, "/serverinfo") {
 		return nil
 	}
+	if l.none {
+		return httpTestOk(http.StatusOK, hoop.ServerInfo{})
+	}
 	info := hoop.ServerLicenseInfo{Type: "enterprise", IsValid: true, Status: "valid"}
 	if l.set {
 		info = hoop.ServerLicenseInfo{Type: l.typ, IsValid: l.valid, Status: l.status}
 	}
 	return httpTestOk(http.StatusOK, hoop.ServerInfo{LicenseInfo: &info})
+}
+
+// listenerNames reads the listener names of a stored document.
+func listenerNames(raw json.RawMessage) map[string]bool {
+	var doc struct {
+		Listeners []struct {
+			Name string `json:"name"`
+		} `json:"listeners"`
+	}
+	_ = json.Unmarshal(raw, &doc)
+	out := map[string]bool{}
+	for _, l := range doc.Listeners {
+		out[l.Name] = true
+	}
+	return out
 }
 
 func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
@@ -270,9 +294,19 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 			return httpTestErr(http.StatusNotFound, "sidecar not found"), nil
 		}
 		if req.Method == http.MethodPut {
+			if g.failSlack {
+				return httpTestErr(http.StatusInternalServerError, "test: slack channels unavailable"), nil
+			}
 			var in hoop.SidecarSlackChannels
 			if err := json.Unmarshal(body, &in); err != nil {
 				return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+			}
+			// A listener must exist in the stored configuration (slackChannelRows).
+			known := listenerNames(sc.Configuration)
+			for _, l := range in.Listeners {
+				if _, ok := known[l.Name]; !ok {
+					return httpTestErr(http.StatusUnprocessableEntity, "sidecar %s has no listener named %q", sc.Name, l.Name), nil
+				}
 			}
 			if g.channels[sc.ID] == nil {
 				g.channels[sc.ID] = map[string][]string{}
@@ -310,6 +344,13 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 			return httpTestErr(http.StatusUnprocessableEntity, "load_from_disk cannot change here: use PATCH"), nil
 		}
 		sc.Configuration = storedDocument(in.Configuration)
+		// A listener the new document no longer has takes its channels with
+		// it (models.PruneSidecarSlackChannels in writeSidecarConfiguration).
+		for name := range g.channels[sc.ID] {
+			if _, ok := listenerNames(sc.Configuration)[name]; !ok {
+				delete(g.channels[sc.ID], name)
+			}
+		}
 		return httpTestOk(http.StatusOK, view(sc)), nil
 	case http.MethodPatch:
 		var in struct {
@@ -333,8 +374,28 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 			}
 			doc[k] = v
 		}
+		before := docFlag(sc.Configuration)
 		sc.Configuration, _ = json.Marshal(doc)
-		return httpTestOk(http.StatusOK, view(sc)), nil
+		out := view(sc)
+		// An owner switch detaches every bound rule, in either direction, and
+		// the answer says which (apisidecar.Patch, services.DetachSidecarRulesTx).
+		if before != docFlag(sc.Configuration) && len(sc.BoundRules) > 0 {
+			detached := &hoop.SidecarDetachedRules{}
+			for _, b := range sc.BoundRules {
+				switch b.Kind {
+				case "guardrail":
+					detached.Unbound.Guardrails = append(detached.Unbound.Guardrails, b.Name)
+				case "datamasking":
+					detached.Unbound.DataMasking = append(detached.Unbound.DataMasking, b.Name)
+				default:
+					detached.Unbound.Analyzers = append(detached.Unbound.Analyzers, b.Name)
+				}
+			}
+			sc.BoundRules = nil
+			out = view(sc)
+			out.DetachedRules = detached
+		}
+		return httpTestOk(http.StatusOK, out), nil
 	case http.MethodDelete:
 		delete(g.byID, sc.ID)
 		delete(g.channels, sc.ID)

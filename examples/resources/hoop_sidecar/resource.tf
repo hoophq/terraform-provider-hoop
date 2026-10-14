@@ -24,11 +24,8 @@ resource "hoop_sidecar" "payments" {
   }
 }
 
-# The same document kept in a YAML file next to the Terraform code.
-resource "hoop_sidecar" "reporting" {
-  name          = "reporting"
-  configuration = jsonencode(yamldecode(file("${path.module}/reporting-sidecar.yaml")))
-}
+# A document kept as the YAML file you already deploy converts with
+#   configuration = jsonencode(yamldecode(file("${path.module}/sidecar.yaml")))
 
 output "payments_sidecar_token" {
   value     = hoop_sidecar.payments.token

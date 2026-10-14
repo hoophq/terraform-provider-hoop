@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -17,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
@@ -147,10 +150,14 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"slack_channels": schema.MapAttribute{
 				Description: "Slack channel ids per listener name, where that listener's reviews are posted. " +
-					"A listener left out uses the organization's default channel. Leave the attribute out to keep " +
-					"channels set outside Terraform; removing a declared value clears every listener it named.",
+					"Every key must be a listener of `configuration`, with at least one channel. A listener left " +
+					"out uses the organization's default channel. Leave the attribute out to keep channels set " +
+					"outside Terraform; removing a declared value clears every listener it named.",
 				ElementType: slackChannelsElementType,
 				Optional:    true,
+				Validators: []validator.Map{
+					mapvalidator.ValueListsAre(listvalidator.SizeAtLeast(1)),
+				},
 			},
 			"token": schema.StringAttribute{
 				Description: "The token the sidecar sends in `hoop-sidecar-token`. The gateway shows it once, at " +
@@ -222,25 +229,39 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	}
 }
 
-// ValidateConfig refuses a load_from_disk key inside the configuration
-// document. The attribute exists so the resource can route the change through
-// PATCH; a copy inside the JSON would bypass that and fail at apply.
+// ValidateConfig refuses at plan what the gateway refuses at write: a
+// load_from_disk key inside the document (the attribute routes it through
+// PATCH), and a slack_channels key that names no listener of the document.
 func (r *sidecarResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data sidecarResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() || data.Configuration.IsNull() || data.Configuration.IsUnknown() {
+	if resp.Diagnostics.HasError() || data.Configuration.IsUnknown() {
 		return
 	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(data.Configuration.ValueString()), &doc); err != nil {
-		// The type's own validation reports the syntax error.
+	listeners := listenerProtocols(data.Configuration)
+	if !data.Configuration.IsNull() {
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(data.Configuration.ValueString()), &doc); err != nil {
+			// The type's own validation reports the syntax error.
+			return
+		}
+		if _, ok := doc[loadFromDiskKey]; ok {
+			resp.Diagnostics.AddAttributeError(path.Root("configuration"),
+				"load_from_disk Belongs in Its Own Attribute",
+				"Remove the load_from_disk key from configuration and set the load_from_disk attribute instead. "+
+					"The gateway only accepts a change to it through a separate call, which the attribute drives.")
+		}
+	}
+	if data.SlackChannels.IsNull() || data.SlackChannels.IsUnknown() {
 		return
 	}
-	if _, ok := doc[loadFromDiskKey]; ok {
-		resp.Diagnostics.AddAttributeError(path.Root("configuration"),
-			"load_from_disk Belongs in Its Own Attribute",
-			"Remove the load_from_disk key from configuration and set the load_from_disk attribute instead. "+
-				"The gateway only accepts a change to it through a separate call, which the attribute drives.")
+	for name := range data.SlackChannels.Elements() {
+		if _, ok := listeners[name]; !ok {
+			resp.Diagnostics.AddAttributeError(path.Root("slack_channels").AtMapKey(name),
+				"Slack Channels Name No Listener",
+				fmt.Sprintf("slack_channels names listener %q, and configuration has no listener with that name. "+
+					"The gateway refuses channels for a listener it does not have.", name))
+		}
 	}
 }
 
@@ -266,7 +287,23 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	var plan, state sidecarResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() || plan.Configuration.IsUnknown() || state.BoundRules.IsNull() {
+	if resp.Diagnostics.HasError() || plan.Configuration.IsUnknown() {
+		return
+	}
+	// The owner switch detaches every rule bound to this sidecar, in either
+	// direction, so after the apply bound_rules is whatever the gateway kept:
+	// unknown now, and no listener is protected by a binding the switch
+	// removes. Say so while the operator can still stop, and skip the guard.
+	flipping := plan.LoadFromDisk.IsUnknown() || plan.LoadFromDisk.ValueBool() != state.LoadFromDisk.ValueBool()
+	if flipping {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("bound_rules"), types.ListUnknown(sidecarRuleBindingObjectType))...)
+	}
+	if state.BoundRules.IsNull() {
+		if !state.Configuration.IsNull() && !flipping && !state.Configuration.Equal(plan.Configuration) {
+			resp.Diagnostics.AddAttributeWarning(path.Root("configuration"), "Sidecar Bindings Unknown",
+				"The rules bound to this sidecar could not be read, so a listener this change removes or renames "+
+					"is not checked here. The gateway refuses the write if a rule is bound to it.")
+		}
 		return
 	}
 	var bound []sidecarRuleBindingModel
@@ -274,13 +311,12 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if resp.Diagnostics.HasError() || len(bound) == 0 {
 		return
 	}
-	// The owner switch detaches every rule bound to this sidecar, in either
-	// direction. Say so while the operator can still stop.
-	if !plan.LoadFromDisk.IsUnknown() && plan.LoadFromDisk.ValueBool() != state.LoadFromDisk.ValueBool() {
+	if flipping {
 		resp.Diagnostics.AddAttributeWarning(path.Root("load_from_disk"), "Owner Switch Detaches Bound Rules",
 			fmt.Sprintf("Changing load_from_disk unbinds the %d rule(s) bound to sidecar %q. Rules imported from this "+
 				"sidecar's file that nothing else uses are deleted. Rules managed by Terraform are recreated or rebound "+
 				"on the next apply; the sidecar runs without them until then.", len(bound), state.Name.ValueString()))
+		return
 	}
 	before := listenerProtocols(state.Configuration)
 	after := listenerProtocols(plan.Configuration)
@@ -349,7 +385,7 @@ func refuseWithoutEnterpriseLicense(client *hoop.Client, resourceType string, di
 		return
 	}
 	check, err := client.CheckEnterpriseLicense()
-	if err != nil || check.Enterprise {
+	if err != nil || check.Unknown || check.Enterprise {
 		return
 	}
 	diags.AddError("Enterprise License Required",
@@ -364,6 +400,10 @@ func documentForWrite(cfg sidecarConfigValue, loadFromDisk bool) (json.RawMessag
 	if !cfg.IsNull() && !cfg.IsUnknown() {
 		if err := json.Unmarshal([]byte(cfg.ValueString()), &doc); err != nil {
 			return nil, fmt.Errorf("the configuration must be a JSON object: %w", err)
+		}
+		// The literal null unmarshals into a nil map without an error.
+		if doc == nil {
+			return nil, fmt.Errorf("the configuration must be a JSON object, got null")
 		}
 	}
 	if loadFromDisk {
@@ -410,9 +450,17 @@ func (r *sidecarResource) readSidecarInto(ctx context.Context, model *sidecarRes
 	} else {
 		model.Configuration = newSidecarConfigValue(string(doc))
 	}
-	var d diag.Diagnostics
-	model.BoundRules, d = boundRulesValue(ctx, sc)
-	diags.Append(d...)
+	// Bindings the gateway could not read are not "none". Keep what the last
+	// read knew, so the listener guard still has something to check; with no
+	// prior knowledge the attribute is null and the guard says so.
+	if sc.BoundRulesUnavailable && !model.BoundRules.IsNull() && !model.BoundRules.IsUnknown() {
+		diags.AddWarning("Sidecar Bindings Unavailable",
+			fmt.Sprintf("The gateway could not read the rules bound to sidecar %q; the last known bindings are kept.", sc.Name))
+	} else {
+		var d diag.Diagnostics
+		model.BoundRules, d = boundRulesValue(ctx, sc)
+		diags.Append(d...)
+	}
 	model.Version = types.StringValue(sc.Version)
 	model.LastSeenAt = types.StringValue(sc.LastSeenAt)
 	model.ConfigState = types.StringValue(sc.ConfigState)
@@ -441,8 +489,10 @@ func (r *sidecarResource) readSidecarInto(ctx context.Context, model *sidecarRes
 
 // slackChannelsForWrite builds the PUT body. The gateway leaves out listeners
 // the body does not name, so every listener the prior state named and the
-// plan dropped goes out with no channels, which clears it.
-func slackChannelsForWrite(ctx context.Context, plan, prior types.Map) (map[string][]string, bool, diag.Diagnostics) {
+// plan dropped goes out with no channels, which clears it. When the current
+// listeners are known, a dropped listener that no longer exists is left out:
+// the gateway already pruned its channels and refuses an entry for it.
+func slackChannelsForWrite(ctx context.Context, plan, prior types.Map, listeners map[string]string) (map[string][]string, bool, diag.Diagnostics) {
 	if plan.IsNull() || plan.IsUnknown() {
 		if prior.IsNull() {
 			return nil, false, nil
@@ -463,9 +513,13 @@ func slackChannelsForWrite(ctx context.Context, plan, prior types.Map) (map[stri
 			return nil, false, diags
 		}
 		for name := range previous {
-			if _, kept := out[name]; !kept {
-				out[name] = []string{}
+			if _, kept := out[name]; kept {
+				continue
 			}
+			if _, exists := listeners[name]; listeners != nil && !exists {
+				continue
+			}
+			out[name] = []string{}
 		}
 	}
 	return out, true, diags
@@ -490,19 +544,24 @@ func (r *sidecarResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 	plan.Token = types.StringValue(created.Token)
 
-	channels, write, diags := slackChannelsForWrite(ctx, plan.SlackChannels, types.MapNull(slackChannelsElementType))
+	channels, write, diags := slackChannelsForWrite(ctx, plan.SlackChannels, types.MapNull(slackChannelsElementType), nil)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	if write {
 		if _, err := r.client.SetSidecarSlackChannels(created.ID, channels); err != nil {
-			resp.Diagnostics.AddError("Error Setting Sidecar Slack Channels",
-				fmt.Sprintf("The sidecar %q was created, but its slack channels failed: %v", created.Name, err))
-			// The sidecar exists. Record it so the next apply retries the
-			// channels instead of trying to create the sidecar again.
-			resp.Diagnostics.Append(r.readSidecarInto(ctx, &plan, &created.Sidecar)...)
-			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+			// A sidecar saved with an error is tainted, and the next apply
+			// replaces it: a new token, and the name recorded as deleted.
+			// Nothing has used this one yet, so undo it and let the next
+			// apply create it again whole.
+			msg := fmt.Sprintf("The sidecar %q was created, but its slack channels failed: %v", created.Name, err)
+			if derr := r.client.DeleteSidecar(created.ID); derr != nil {
+				msg += fmt.Sprintf(". Removing the sidecar again failed too: %v. Import it with `terraform import` or delete it in the control plane", derr)
+			} else {
+				msg += ". The sidecar was removed again; fix the channels and apply"
+			}
+			resp.Diagnostics.AddError("Error Setting Sidecar Slack Channels", msg)
 			return
 		}
 	}
@@ -577,7 +636,11 @@ func (r *sidecarResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	channels, write, diags := slackChannelsForWrite(ctx, plan.SlackChannels, state.SlackChannels)
+	// The gateway pruned the channels of every listener the new document no
+	// longer has, and refuses a channel entry for a listener it does not
+	// know. So the clear-outs for dropped listeners are limited to listeners
+	// that still exist; the rest are already gone.
+	channels, write, diags := slackChannelsForWrite(ctx, plan.SlackChannels, state.SlackChannels, listenerProtocols(plan.Configuration))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

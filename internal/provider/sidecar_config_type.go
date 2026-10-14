@@ -93,6 +93,13 @@ func (v sidecarConfigValue) ValidateAttribute(_ context.Context, req xattr.Valid
 	if err := json.Unmarshal([]byte(v.ValueString()), &doc); err != nil {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid Sidecar Configuration",
 			fmt.Sprintf("The configuration must be a JSON object: %v", err))
+		return
+	}
+	// The literal null unmarshals into a nil map without an error, and the
+	// gateway refuses it too ("expected an object, got null").
+	if doc == nil {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid Sidecar Configuration",
+			"The configuration must be a JSON object, got null. Omit the attribute for an empty document.")
 	}
 }
 
