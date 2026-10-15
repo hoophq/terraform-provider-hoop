@@ -349,6 +349,19 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
+	// The gateway replaces a rule's attribute links on every write and reads
+	// an absent key as none. The resource does not manage them, so they go
+	// back as stored, or every update would unlink the attributes set in the
+	// UI.
+	stored, err := r.client.GetDatamaskingRule(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error Reading Data Masking Rule",
+			fmt.Sprintf("Failed to read the attribute links of data masking rule %q before updating it: %v", plan.Name.ValueString(), err),
+		)
+		return
+	}
+
 	rule, err := r.client.UpdateDatamaskingRule(hoop.DataMaskingRule{
 		ID:                   plan.ID.ValueString(),
 		Name:                 plan.Name.ValueString(),
@@ -357,6 +370,7 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		ConnectionIDs:        connectionIDs,
 		SupportedEntityTypes: supportedEntityTypeItems,
 		CustomEntityTypes:    customEntityTypeItems,
+		Attributes:           stored.Attributes,
 		SidecarSpec:          toApiJSON(plan.SidecarSpec, state.SidecarSpec),
 		SidecarTargets:       sidecarTargets,
 	})
@@ -405,18 +419,28 @@ func (r *datamaskingRulesResource) Delete(ctx context.Context, req resource.Dele
 	}
 }
 
-// ModifyPlan warns when a declared sidecar_targets is removed, since the
-// write that follows unbinds the rule from every sidecar it named.
+// ModifyPlan refuses a write that would leave a bound rule without a sidecar
+// spec, and warns when a declared sidecar_targets is removed, since the write
+// that follows unbinds the rule from every sidecar it named.
 func (r *datamaskingRulesResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+	if req.Plan.Raw.IsNull() {
 		return
 	}
-	var plan, state datamaskingRulesResourceModel
+	var plan datamaskingRulesResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if req.State.Raw.IsNull() {
+		refuseBoundRuleWithoutSpec(plan.SidecarSpec, jsontypes.NewNormalizedNull(), true, plan.SidecarTargets, &resp.Diagnostics)
+		return
+	}
+	var state datamaskingRulesResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	refuseBoundRuleWithoutSpec(plan.SidecarSpec, state.SidecarSpec, false, plan.SidecarTargets, &resp.Diagnostics)
 	warnOnUnbind(ctx, "hoop_datamasking_rules", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 

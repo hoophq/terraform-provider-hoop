@@ -116,6 +116,43 @@ resource "hoop_access_request_rule" "prod" {
 	})
 }
 
+// The gateway answers attribute names sorted on a read and in the written
+// order on a write. Written in any order, they apply, plan clean and import.
+func TestAccessRequestRuleResourceAttributesAnyOrder(t *testing.T) {
+	gw := newFakeRuleGateway("/access-requests/rules", true)
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testProviderBlock + `
+resource "hoop_access_request_rule" "prod" {
+  name             = "prod-jit"
+  access_type      = "jit"
+  attributes       = ["zz-prod", "aa-pci"]
+  reviewers_groups = ["sre"]
+  min_approvals    = 1
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("hoop_access_request_rule.prod", "attributes.#", "2"),
+					resource.TestCheckTypeSetElemAttr("hoop_access_request_rule.prod", "attributes.*", "aa-pci"),
+				),
+			},
+			// Import cannot tell whether the configuration owns the links,
+			// so an imported rule has null attributes.
+			{
+				ResourceName:            "hoop_access_request_rule.prod",
+				ImportState:             true,
+				ImportStateId:           "prod-jit",
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"attributes"},
+			},
+		},
+	})
+}
+
 func TestAccessRequestRuleResourceValidation(t *testing.T) {
 	gw := newFakeRuleGateway("/access-requests/rules", true)
 	for _, tt := range []struct {

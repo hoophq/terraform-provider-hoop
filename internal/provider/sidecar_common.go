@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -119,10 +120,22 @@ func toApiSidecarTargets(ctx context.Context, plan, prior types.List) (hoop.Side
 // fromApiSidecarTargets writes the gateway's bindings into state. A prior null
 // stays null: the operator never declared the attribute, and the bindings are
 // not Terraform's to report.
+//
+// The gateway answers bindings sorted by sidecar id and listener, not in the
+// order they were sent, so they are put back in the prior's order: the plan's
+// after a write, the state's on a read. Bindings the prior does not name follow
+// in the gateway's order.
 func fromApiSidecarTargets(ctx context.Context, prior types.List, targets []hoop.SidecarRuleTarget) (types.List, diag.Diagnostics) {
 	if prior.IsNull() {
 		return types.ListNull(sidecarTargetObjectType), nil
 	}
+	var priorItems []sidecarTargetModel
+	if !prior.IsUnknown() {
+		if diags := prior.ElementsAs(ctx, &priorItems, false); diags.HasError() {
+			return types.ListNull(sidecarTargetObjectType), diags
+		}
+	}
+	targets = reorderTargets(priorItems, targets)
 	items := make([]sidecarTargetModel, 0, len(targets))
 	for _, t := range targets {
 		items = append(items, sidecarTargetModel{
@@ -131,6 +144,31 @@ func fromApiSidecarTargets(ctx context.Context, prior types.List, targets []hoop
 		})
 	}
 	return types.ListValueFrom(ctx, sidecarTargetObjectType, items)
+}
+
+// reorderTargets returns targets in the order prior names them, followed by
+// the ones prior does not name, in their own order. An unknown prior element
+// matches nothing.
+func reorderTargets(prior []sidecarTargetModel, targets []hoop.SidecarRuleTarget) []hoop.SidecarRuleTarget {
+	remaining := make(map[hoop.SidecarRuleTarget]int, len(targets))
+	for _, t := range targets {
+		remaining[t]++
+	}
+	ordered := make([]hoop.SidecarRuleTarget, 0, len(targets))
+	for _, p := range prior {
+		t := hoop.SidecarRuleTarget{SidecarID: p.SidecarID.ValueString(), ListenerName: p.ListenerName.ValueString()}
+		if remaining[t] > 0 {
+			ordered = append(ordered, t)
+			remaining[t]--
+		}
+	}
+	for _, t := range targets {
+		if remaining[t] > 0 {
+			ordered = append(ordered, t)
+			remaining[t]--
+		}
+	}
+	return ordered
 }
 
 // toApiJSON reads a JSON attribute for a request. A null plan with a null prior
@@ -166,6 +204,25 @@ func fromApiJSON(prior jsontypes.Normalized, raw json.RawMessage) jsontypes.Norm
 		return jsontypes.NewNormalizedNull()
 	}
 	return jsontypes.NewNormalizedValue(string(raw))
+}
+
+// jsonencodeForm rewrites a JSON document the way Terraform's jsonencode
+// writes one: keys sorted, no whitespace, numbers as written. A value read
+// with no prior to compare against, as after an import, lands in state in
+// that form, so a configuration that builds it with jsonencode plans no
+// change. A document that does not parse is returned unchanged.
+func jsonencodeForm(raw []byte) string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 // fromApiJSONOr is fromApiJSON for a required field with a fallback. The state
@@ -214,6 +271,41 @@ func fromApiStringList(ctx context.Context, prior types.List, values []string) (
 	return types.ListValueFrom(ctx, types.StringType, values)
 }
 
+// toApiStringSet reads an optional set of strings. Null sends an empty list,
+// which is what the gateway stores for "none".
+func toApiStringSet(ctx context.Context, set types.Set) ([]string, diag.Diagnostics) {
+	out := []string{}
+	if set.IsNull() || set.IsUnknown() {
+		return out, nil
+	}
+	diags := set.ElementsAs(ctx, &out, false)
+	return out, diags
+}
+
+// fromApiOwnedStringSet writes a set of links into state, null while
+// undeclared: the links may have been made from the other side, such as on
+// the attribute itself, and reading them in would plan their removal. A set,
+// because the gateway answers some lists sorted whatever order they were
+// written in (attribute names), and a list would plan that reorder forever.
+func fromApiOwnedStringSet(ctx context.Context, prior types.Set, values []string) (types.Set, diag.Diagnostics) {
+	if prior.IsNull() {
+		return types.SetNull(types.StringType), nil
+	}
+	if values == nil {
+		values = []string{}
+	}
+	return types.SetValueFrom(ctx, types.StringType, values)
+}
+
+// orEmpty returns values, or an empty list for nil, so a links field written
+// back from a read goes out as [] rather than null.
+func orEmpty(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
 // toApiOwnedStringList reads a list the gateway keeps when the key is absent.
 // A null plan over a null prior omits the key; over a declared prior it sends
 // [] to clear.
@@ -253,6 +345,26 @@ func fromApiString(prior types.String, value string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(value)
+}
+
+// refuseBoundRuleWithoutSpec is the gateway's ValidateSidecarRuleSpec at plan:
+// a rule bound to a listener has to say what it does there, and the gateway
+// refuses the write that would leave one without a spec. That is a create
+// with declared targets and no sidecar_spec, or a declared sidecar_spec
+// removed while declared targets stay, which sends the null that clears it.
+// A spec never declared on an existing rule is not sent, so the gateway keeps
+// what it stores, possibly set in the UI; that case is left to the gateway.
+func refuseBoundRuleWithoutSpec(plan, prior jsontypes.Normalized, creating bool, targets types.List, diags *diag.Diagnostics) {
+	if !plan.IsNull() || targets.IsNull() || targets.IsUnknown() || len(targets.Elements()) == 0 {
+		return
+	}
+	if !creating && prior.IsNull() {
+		return
+	}
+	diags.AddAttributeError(path.Root("sidecar_spec"), "Bound Rule Needs a Sidecar Spec",
+		fmt.Sprintf("sidecar_targets binds this rule to %d listener(s), and sidecar_spec is not set. The gateway "+
+			"refuses a bound rule that does not say what it does on its listeners. Set sidecar_spec, or set "+
+			"sidecar_targets to [] to unbind the rule in the same change.", len(targets.Elements())))
 }
 
 // warnOnUnbind adds a plan warning when a declared sidecar_targets is removed

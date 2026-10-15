@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -84,6 +85,55 @@ resource "hoop_sidecar_service_account" "gke" {
 				ImportState:       true,
 				ImportStateId:     "rule-1",
 				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// The patterns the gateway refuses at write (services.checkSubjectPattern and
+// ValidateSidecarServiceAccount) are refused at plan, and the ones it accepts
+// plan clean.
+func TestSidecarServiceAccountResourcePatternValidation(t *testing.T) {
+	gw := newFakeRuleGateway("/sidecar-service-accounts", false)
+	config := func(pattern, template, extra string) string {
+		return testProviderBlock + `
+resource "hoop_sidecar_service_account" "gke" {
+  name            = "gke-eu"
+  issuer          = "https://issuer.example.com"
+  audience        = "https://hoop.example.com"
+  claim           = "sub"
+  subject_pattern = "` + pattern + `"
+  name_template   = "` + template + `"
+` + extra + `
+}`
+	}
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config:      config("*", "any-{1}", ``),
+				ExpectError: regexp.MustCompile(`Bare Wildcard Needs allow_any_subject`),
+			},
+			{
+				Config:      config("*", "any-{1}", `  allow_any_subject = false`),
+				ExpectError: regexp.MustCompile(`Bare Wildcard Needs allow_any_subject`),
+			},
+			{
+				Config:      config("system:serviceaccount:*:*", "gke-{1}", ``),
+				ExpectError: regexp.MustCompile(`Subject Pattern Has More Than One Wildcard`),
+			},
+			{
+				Config:      config("system:serviceaccount:ns:hoop-sidecar", "gke-{1}", ``),
+				ExpectError: regexp.MustCompile(`Name Template Has Nothing To Capture`),
+			},
+			{
+				Config: config("system:serviceaccount:ns:hoop-sidecar", "gke-ns", ``),
+			},
+			{
+				Config: config("*", "any-{1}", `  allow_any_subject = true`),
 			},
 		},
 	})

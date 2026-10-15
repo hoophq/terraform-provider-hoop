@@ -34,7 +34,7 @@ type guardrailResourceModel struct {
 	Input          jsontypes.Normalized `tfsdk:"input"`
 	Output         jsontypes.Normalized `tfsdk:"output"`
 	ConnectionIDs  types.List           `tfsdk:"connection_ids"`
-	Attributes     types.List           `tfsdk:"attributes"`
+	Attributes     types.Set            `tfsdk:"attributes"`
 	SidecarSpec    jsontypes.Normalized `tfsdk:"sidecar_spec"`
 	SidecarTargets types.List           `tfsdk:"sidecar_targets"`
 }
@@ -81,12 +81,18 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"output": jsonAttribute("Rules applied to what the connection returns, in the same shape as `input`. " +
 				"Omit it for a rule with no output checks."),
 			"connection_ids": schema.ListAttribute{
-				Description: "The connections this rule applies to on the gateway.",
+				Description: "The connections this rule applies to on the gateway. " +
+					"Leave the attribute out to keep connections linked outside this resource, such as through " +
+					"`hoop_connection`'s `guardrail_rules`; removing a declared value unlinks them. " +
+					"Manage each link from one side only.",
 				ElementType: types.StringType,
 				Optional:    true,
 			},
-			"attributes": schema.ListAttribute{
-				Description: "Attribute names this rule is associated with.",
+			"attributes": schema.SetAttribute{
+				Description: "Attribute names this rule is associated with. Leave the attribute out to keep " +
+					"attribute links made outside this resource, such as on the attribute itself; removing a " +
+					"declared value unlinks them. The gateway creates an attribute it does not know yet, and keeps " +
+					"it after the rule is deleted.",
 				ElementType: types.StringType,
 				Optional:    true,
 			},
@@ -108,7 +114,7 @@ func (m *guardrailResourceModel) toApi(ctx context.Context, prior *guardrailReso
 	var d diag.Diagnostics
 	rule.ConnectionIDs, d = toApiStringList(ctx, m.ConnectionIDs)
 	diags.Append(d...)
-	rule.Attributes, d = toApiStringList(ctx, m.Attributes)
+	rule.Attributes, d = toApiStringSet(ctx, m.Attributes)
 	diags.Append(d...)
 
 	priorSpec := jsontypes.NewNormalizedNull()
@@ -133,9 +139,12 @@ func (m *guardrailResourceModel) fromApi(ctx context.Context, rule *hoop.GuardRa
 	diags.Append(d...)
 	m.Output, d = fromApiJSONOr(ctx, m.Output, rule.Output, emptyRules)
 	diags.Append(d...)
-	m.ConnectionIDs, d = fromApiStringList(ctx, m.ConnectionIDs, rule.ConnectionIDs)
+	// Undeclared connection_ids stays null even when the gateway reports
+	// links: they may come from hoop_connection's guardrail_rules, and
+	// reading them in would plan their removal.
+	m.ConnectionIDs, d = fromApiOwnedStringList(ctx, m.ConnectionIDs, &rule.ConnectionIDs)
 	diags.Append(d...)
-	m.Attributes, d = fromApiStringList(ctx, m.Attributes, rule.Attributes)
+	m.Attributes, d = fromApiOwnedStringSet(ctx, m.Attributes, rule.Attributes)
 	diags.Append(d...)
 	m.SidecarSpec = fromApiJSON(m.SidecarSpec, rule.SidecarSpec)
 	m.SidecarTargets, d = fromApiSidecarTargets(ctx, m.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
@@ -203,6 +212,26 @@ func (r *guardrailResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 	payload.ID = state.ID.ValueString()
+	// The gateway replaces a guardrail's connection and attribute links on
+	// every write and reads an absent key as none. A configuration that never
+	// declared one of them leaves those links to the other side, hoop_connection
+	// or the attribute itself, so the write carries back the ones stored now.
+	keepConnections := plan.ConnectionIDs.IsNull() && state.ConnectionIDs.IsNull()
+	keepAttributes := plan.Attributes.IsNull() && state.Attributes.IsNull()
+	if keepConnections || keepAttributes {
+		stored, err := r.client.GetGuardRailRule(payload.ID)
+		if err != nil {
+			resp.Diagnostics.AddError("Error Reading Guardrail",
+				fmt.Sprintf("Failed to read the links of guardrail %q before updating it: %v", plan.Name.ValueString(), err))
+			return
+		}
+		if keepConnections {
+			payload.ConnectionIDs = orEmpty(stored.ConnectionIDs)
+		}
+		if keepAttributes {
+			payload.Attributes = orEmpty(stored.Attributes)
+		}
+	}
 	rule, err := r.client.UpdateGuardRailRule(payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Updating Guardrail",
@@ -229,18 +258,28 @@ func (r *guardrailResource) Delete(ctx context.Context, req resource.DeleteReque
 	}
 }
 
-// ModifyPlan warns when a declared sidecar_targets is removed, since the
-// write that follows unbinds the rule from every sidecar it named.
+// ModifyPlan refuses a write that would leave a bound rule without a sidecar
+// spec, and warns when a declared sidecar_targets is removed, since the write
+// that follows unbinds the rule from every sidecar it named.
 func (r *guardrailResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+	if req.Plan.Raw.IsNull() {
 		return
 	}
-	var plan, state guardrailResourceModel
+	var plan guardrailResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if req.State.Raw.IsNull() {
+		refuseBoundRuleWithoutSpec(plan.SidecarSpec, jsontypes.NewNormalizedNull(), true, plan.SidecarTargets, &resp.Diagnostics)
+		return
+	}
+	var state guardrailResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	refuseBoundRuleWithoutSpec(plan.SidecarSpec, state.SidecarSpec, false, plan.SidecarTargets, &resp.Diagnostics)
 	warnOnUnbind(ctx, "hoop_guardrail", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -157,14 +159,19 @@ type fakeSidecarGateway struct {
 	// failSlack makes every slack channel write answer 500, the failure a
 	// plan cannot see coming.
 	failSlack bool
+	// beforePut runs on a configuration PUT before it is stored. It stands in
+	// for what changes between plan and apply: a bound rule destroyed earlier
+	// in the same apply, or another actor binding one.
+	beforePut func(sc *hoop.Sidecar)
 }
 
 // bind records a rule binding the way the rule API would, so the next read
-// of the sidecar reports it under bound_rules.
-func (g *fakeSidecarGateway) bind(sidecarID string, b hoop.SidecarRuleBinding) {
+// of the sidecar reports it under bound_rules. It binds to the first sidecar
+// the fake created, sc-1, which is the one a binding test manages.
+func (g *fakeSidecarGateway) bind(b hoop.SidecarRuleBinding) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	sc := g.byID[sidecarID]
+	sc := g.byID["sc-1"]
 	sc.BoundRules = append(sc.BoundRules, b)
 }
 
@@ -343,6 +350,9 @@ func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
 		if docFlag(sc.Configuration) != docFlag(in.Configuration) {
 			return httpTestErr(http.StatusUnprocessableEntity, "load_from_disk cannot change here: use PATCH"), nil
 		}
+		if g.beforePut != nil {
+			g.beforePut(sc)
+		}
 		sc.Configuration = storedDocument(in.Configuration)
 		// A listener the new document no longer has takes its channels with
 		// it (models.PruneSidecarSlackChannels in writeSidecarConfiguration).
@@ -458,6 +468,27 @@ func refuseNamelessTarget(rule map[string]json.RawMessage) *http.Response {
 	return nil
 }
 
+// sortTargets does what the gateway does when it answers a rule: its bindings
+// come back ORDER BY sidecar_id, listener_name, not in the order they were
+// sent (models.ListSidecarRuleBindings).
+func sortTargets(rule map[string]json.RawMessage) {
+	raw, ok := rule["sidecar_targets"]
+	if !ok || string(raw) == "null" {
+		return
+	}
+	var targets []hoop.SidecarRuleTarget
+	if err := json.Unmarshal(raw, &targets); err != nil {
+		return
+	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		if targets[i].SidecarID != targets[j].SidecarID {
+			return targets[i].SidecarID < targets[j].SidecarID
+		}
+		return targets[i].ListenerName < targets[j].ListenerName
+	})
+	rule["sidecar_targets"], _ = json.Marshal(targets)
+}
+
 // dropZeroLimits does what the gateway does with a review limit of 0: it
 // stores no limit and answers no key (services.StoredSidecarReviewTTL).
 func dropZeroLimits(rule map[string]json.RawMessage) {
@@ -477,6 +508,24 @@ func nullEmptyConnections(rule map[string]json.RawMessage) {
 			rule[key] = json.RawMessage("null")
 		}
 	}
+}
+
+// sortedAttributes does what the gateway does when a rule is read: attribute
+// names come back ORDER BY name, while a write answers them in the order they
+// were sent. A rule that kept them as a list would plan the reorder forever.
+func sortedAttributes(rule map[string]json.RawMessage) map[string]json.RawMessage {
+	raw, ok := rule["attributes"]
+	if !ok {
+		return rule
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return rule
+	}
+	sort.Strings(names)
+	out := maps.Clone(rule)
+	out["attributes"], _ = json.Marshal(names)
+	return out
 }
 
 func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
@@ -503,6 +552,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 		}
 		nullEmptyConnections(in)
 		dropZeroLimits(in)
+		sortTargets(in)
 		g.rules[g.key(in)] = in
 		return httpTestOk(http.StatusCreated, in), nil
 	}
@@ -514,7 +564,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 	}
 	switch req.Method {
 	case http.MethodGet:
-		return httpTestOk(http.StatusOK, stored), nil
+		return httpTestOk(http.StatusOK, sortedAttributes(stored)), nil
 	case http.MethodPut:
 		var in map[string]json.RawMessage
 		if err := json.Unmarshal(body, &in); err != nil {
@@ -537,6 +587,7 @@ func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
 		}
 		nullEmptyConnections(in)
 		dropZeroLimits(in)
+		sortTargets(in)
 		delete(g.rules, key)
 		g.rules[g.key(in)] = in
 		return httpTestOk(http.StatusOK, in), nil

@@ -3,12 +3,12 @@
 page_title: "hoop_ai_session_analyzer_rule Resource - hoop"
 subcategory: ""
 description: |-
-  Manages an AI session analyzer rule. On the gateway the rule classifies the sessions of connection_names and applies risk_evaluation. On a sidecar fleet, sidecar_spec is the analyzer block a listener receives and sidecar_targets names the listeners; one rule per listener.
+  Manages an AI session analyzer rule. On the gateway the rule classifies the sessions of connection_names and applies risk_evaluation. On a sidecar fleet, sidecar_spec is the analyzer block a listener receives and sidecar_targets names the listeners; one rule per listener. A sidecar needs its own top-level analyzer section (provider, model, credential) in configuration before an analyzer rule can be bound to it.
 ---
 
 # hoop_ai_session_analyzer_rule (Resource)
 
-Manages an AI session analyzer rule. On the gateway the rule classifies the sessions of `connection_names` and applies `risk_evaluation`. On a sidecar fleet, `sidecar_spec` is the analyzer block a listener receives and `sidecar_targets` names the listeners; one rule per listener.
+Manages an AI session analyzer rule. On the gateway the rule classifies the sessions of `connection_names` and applies `risk_evaluation`. On a sidecar fleet, `sidecar_spec` is the analyzer block a listener receives and `sidecar_targets` names the listeners; one rule per listener. A sidecar needs its own top-level `analyzer` section (provider, model, credential) in `configuration` before an analyzer rule can be bound to it.
 
 ## Example Usage
 
@@ -32,7 +32,10 @@ resource "hoop_ai_session_analyzer_rule" "prod" {
 
 # Statement analysis on a sidecar listener. sidecar_spec is the analyzer block
 # the listener receives; a held statement waits up to 15 minutes for one of
-# the dba-leads to release it.
+# the dba-leads to release it. approval_rule names this rule itself, so the
+# gateway manages the approval rule from reviewers_groups and pending_ttl_sec.
+# The sidecar's configuration needs a top-level analyzer section (provider,
+# model, credential) before the rule can be bound to it.
 resource "hoop_ai_session_analyzer_rule" "appdb" {
   name = "appdb-analysis"
 
@@ -43,8 +46,9 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
   }
 
   sidecar_spec = jsonencode({
-    trigger = "statement"
-    high    = "defer"
+    trigger       = { operations = ["update", "delete"] }
+    high          = "require_review"
+    approval_rule = "appdb-analysis"
   })
 
   sidecar_targets  = [{ sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" }]
@@ -68,8 +72,8 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
 - `connection_names` (List of String) The connections this rule analyzes on the gateway. Leave it out for a rule that only sidecars run.
 - `custom_prompt` (String) Extra instructions appended to the default system prompt.
 - `description` (String) The rule description.
-- `pending_ttl_sec` (Number) Seconds a held statement's review may wait for a decision, 60 to 604800. The gateway reads it only while `sidecar_spec` holds statements for approval.
-- `reviewers_groups` (List of String) The groups whose members may release a statement this rule holds for approval. With none set the admin group reviews. Leave the attribute out to keep groups set outside Terraform; removing a declared value clears them.
+- `pending_ttl_sec` (Number) Seconds a held statement's review may wait for a decision, 60 to 604800. Same conditions as `reviewers_groups`.
+- `reviewers_groups` (List of String) The groups whose members may release a statement this rule holds for approval. Only for a rule whose `sidecar_spec` holds statements (`require_review`) with `approval_rule` set to this rule's `name`: the gateway then manages an access request rule under that name. With an `approval_rule` naming another rule, set the groups on that `hoop_access_request_rule`. With none set the admin group reviews. Leave the attribute out to keep groups set outside Terraform; removing a declared value clears them.
 - `sidecar_spec` (String) The rule in the sidecar's own vocabulary, as a JSON object. The control plane places this block on each bound listener. Leave the attribute out to keep the block stored on the gateway; removing a declared value clears it.
 - `sidecar_targets` (Attributes List) The sidecar listeners the control plane distributes this rule to. Each entry names a sidecar and one of its listeners. Leave the attribute out to keep bindings made outside Terraform. Set it to `[]` to unbind the rule from every sidecar. (see [below for nested schema](#nestedatt--sidecar_targets))
 

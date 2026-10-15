@@ -22,7 +22,7 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
   }
 
   sidecar_spec = jsonencode({
-    trigger       = "statement"
+    trigger       = { operations = ["update", "delete"] }
     high          = "require_review"
     approval_rule = hoop_access_request_rule.dba_approvals.name
   })

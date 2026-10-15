@@ -238,3 +238,43 @@ resource "hoop_datamasking_rules" "pii" {
 		},
 	})
 }
+
+// Attribute links are made on the attribute; the resource has no attribute
+// for them. The gateway replaces a rule's links on every write and reads an
+// absent key as none, so an update must carry back the ones it stores.
+func TestDataMaskingRulesResourceKeepsAttributeLinks(t *testing.T) {
+	gw := newFakeRuleGateway("/datamasking-rules", false)
+	config := func(description string) string {
+		return testProviderBlock + `
+resource "hoop_datamasking_rules" "pii" {
+  name                   = "mask-pii"
+  description            = "` + description + `"
+  score_threshold        = 0.5
+  connection_ids         = []
+  custom_entity_types    = []
+  supported_entity_types = [{ name = "PII", entity_types = ["EMAIL_ADDRESS"] }]
+}`
+	}
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: config("v1"),
+			},
+			{
+				PreConfig: func() {
+					gw.mu.Lock()
+					defer gw.mu.Unlock()
+					gw.rules["rule-1"]["attributes"] = json.RawMessage(`["pci"]`)
+				},
+				Config: config("v2"),
+				Check: checkLastBody(gw.rec, "PUT", "/datamasking-rules/rule-1", map[string]string{
+					"attributes": `["pci"]`,
+				}),
+			},
+		},
+	})
+}

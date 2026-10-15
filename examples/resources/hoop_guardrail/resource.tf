@@ -1,6 +1,7 @@
 # Copyright (c) HashiCorp, Inc.
 
 # A guardrail enforced on the gateway, for the sessions of one connection.
+# connection_ids owns the link: leave guardrail_rules out of that connection.
 resource "hoop_guardrail" "no_drop" {
   name        = "no-drop"
   description = "Refuse DROP statements"

@@ -37,7 +37,7 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
   }
 
   sidecar_spec = jsonencode({
-    trigger       = "statement"
+    trigger       = { operations = ["update", "delete"] }
     high          = "require_review"
     approval_rule = hoop_access_request_rule.dba_approvals.name
   })
@@ -72,7 +72,7 @@ resource "hoop_access_request_rule" "prod_jit" {
 - `all_groups_must_approve` (Boolean) When true, one approval from each of `reviewers_groups` is needed and `min_approvals` is ignored.
 - `approval_required_groups` (List of String) User groups whose members need approval. Empty makes every requester need approval.
 - `approval_ttl_sec` (Number) Seconds a sidecar approval lasts, 60 to 604800. Sidecar rules only.
-- `attributes` (List of String) Attribute names this rule is associated with.
+- `attributes` (Set of String) Attribute names this rule is associated with. Leave the attribute out to keep attribute links made outside this resource, such as on the attribute itself; removing a declared value unlinks them. The gateway creates an attribute it does not know yet, and keeps it after the rule is deleted.
 - `connection_names` (List of String) The connections this rule gates. Required, or `attributes`, unless `access_type` is `sidecar`, which refuses it.
 - `description` (String) The rule description.
 - `force_approval_groups` (List of String) Groups whose members may approve on their own.

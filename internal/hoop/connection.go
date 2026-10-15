@@ -11,23 +11,27 @@ import (
 )
 
 type Connection struct {
-	ID                  string            `json:"id"`
-	Name                string            `json:"name"`
-	Command             []string          `json:"command"`
-	Type                string            `json:"type"`
-	SubType             string            `json:"subtype"`
-	Secrets             map[string]string `json:"secret"`
-	AgentId             string            `json:"agent_id"`
-	Reviewers           []string          `json:"reviewers"`
-	RedactEnabled       bool              `json:"redact_enabled"`
-	RedactTypes         []string          `json:"redact_types"`
-	ConnectionTags      map[string]string `json:"connection_tags"`
-	AccessModeRunbooks  string            `json:"access_mode_runbooks"`
-	AccessModeExec      string            `json:"access_mode_exec"`
-	AccessModeConnect   string            `json:"access_mode_connect"`
-	AccessSchema        string            `json:"access_schema"`
-	GuardRailRules      []string          `json:"guardrail_rules"`
-	JiraIssueTemplateID string            `json:"jira_issue_template_id"`
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	Command            []string          `json:"command"`
+	Type               string            `json:"type"`
+	SubType            string            `json:"subtype"`
+	Secrets            map[string]string `json:"secret"`
+	AgentId            string            `json:"agent_id"`
+	Reviewers          []string          `json:"reviewers"`
+	RedactEnabled      bool              `json:"redact_enabled"`
+	RedactTypes        []string          `json:"redact_types"`
+	ConnectionTags     map[string]string `json:"connection_tags"`
+	AccessModeRunbooks string            `json:"access_mode_runbooks"`
+	AccessModeExec     string            `json:"access_mode_exec"`
+	AccessModeConnect  string            `json:"access_mode_connect"`
+	AccessSchema       string            `json:"access_schema"`
+	GuardRailRules     []string          `json:"guardrail_rules"`
+	// Attributes is read only to be written back: the gateway replaces a
+	// connection's attribute links on every write and reads an absent key as
+	// none, and the resource does not manage them.
+	Attributes          []string `json:"attributes,omitempty"`
+	JiraIssueTemplateID string   `json:"jira_issue_template_id"`
 }
 
 func (c *Client) GetConnection(name string) (*Connection, error) {

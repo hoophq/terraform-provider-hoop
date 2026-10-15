@@ -46,7 +46,7 @@ type Sidecar struct {
 // datamasking or analyzer), its name, and the listener it is bound to.
 type SidecarRuleBinding struct {
 	Kind         string `json:"kind"`
-	Name         string `json:"name"`
+	Name         string `json:"rule_name"`
 	ListenerName string `json:"listener_name"`
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -21,9 +22,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &sidecarServiceAccountResource{}
-	_ resource.ResourceWithImportState = &sidecarServiceAccountResource{}
-	_ resource.ResourceWithModifyPlan  = &sidecarServiceAccountResource{}
+	_ resource.Resource                   = &sidecarServiceAccountResource{}
+	_ resource.ResourceWithImportState    = &sidecarServiceAccountResource{}
+	_ resource.ResourceWithModifyPlan     = &sidecarServiceAccountResource{}
+	_ resource.ResourceWithValidateConfig = &sidecarServiceAccountResource{}
 )
 
 func NewSidecarServiceAccountResource() resource.Resource {
@@ -55,6 +57,41 @@ var sidecarClaimValidator = []validator.String{
 	stringvalidator.OneOf("sub", "email"),
 }
 
+// sidecarNameCapture is the placeholder name_template fills with the text the
+// subject pattern's * matched.
+const sidecarNameCapture = "{1}"
+
+// ValidateConfig refuses at plan the patterns the gateway refuses at write
+// (services.checkSubjectPattern and ValidateSidecarServiceAccount): more than
+// one *, a bare * without allow_any_subject, and a name_template that reads
+// {1} from a pattern with no * to fill it.
+func (r *sidecarServiceAccountResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data sidecarServiceAccountResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() || data.SubjectPattern.IsNull() || data.SubjectPattern.IsUnknown() {
+		return
+	}
+	pattern := data.SubjectPattern.ValueString()
+	if n := strings.Count(pattern, "*"); n > 1 {
+		resp.Diagnostics.AddAttributeError(path.Root("subject_pattern"), "Subject Pattern Has More Than One Wildcard",
+			fmt.Sprintf("subject_pattern %q has %d `*`. The gateway allows at most one, the text name_template reads "+
+				"as %s.", pattern, n, sidecarNameCapture))
+	}
+	// An omitted allow_any_subject is null here and false once its default
+	// applies; only an unknown value waits for the apply.
+	if pattern == "*" && !data.AllowAnySubject.IsUnknown() && !data.AllowAnySubject.ValueBool() {
+		resp.Diagnostics.AddAttributeError(path.Root("subject_pattern"), "Bare Wildcard Needs allow_any_subject",
+			"subject_pattern `*` admits every subject of the issuer. Set allow_any_subject = true to mean it, or "+
+				"narrow the pattern, such as `system:serviceaccount:*:hoop-sidecar`.")
+	}
+	if !strings.Contains(pattern, "*") && !data.NameTemplate.IsNull() && !data.NameTemplate.IsUnknown() &&
+		strings.Contains(data.NameTemplate.ValueString(), sidecarNameCapture) {
+		resp.Diagnostics.AddAttributeError(path.Root("name_template"), "Name Template Has Nothing To Capture",
+			fmt.Sprintf("name_template uses %s, the text the `*` of subject_pattern matched, and subject_pattern %q "+
+				"has no `*`. Put a `*` in the pattern or a fixed name in the template.", sidecarNameCapture, pattern))
+	}
+}
+
 func (r *sidecarServiceAccountResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Lets sidecars authenticate with a token their platform issued, a Kubernetes projected " +
@@ -76,8 +113,9 @@ func (r *sidecarServiceAccountResource) Schema(_ context.Context, _ resource.Sch
 				Validators:  NonEmptyStringValidator,
 			},
 			"issuer": schema.StringAttribute{
-				Description: "The exact `iss` of the tokens. An https URL. The control plane fetches the signing keys " +
-					"through OIDC discovery unless `jwks` is set.",
+				Description: "The exact `iss` of the tokens. Without `jwks`, an https URL with no query or fragment, " +
+					"where the control plane fetches the signing keys through OIDC discovery. With `jwks`, the keys " +
+					"come from that document and the issuer is matched as written.",
 				Required:   true,
 				Validators: NonEmptyStringValidator,
 			},
@@ -155,7 +193,7 @@ func (m *sidecarServiceAccountResourceModel) fromApi(sa *hoop.SidecarServiceAcco
 	if len(sa.JWKS) == 0 || string(sa.JWKS) == "null" {
 		m.JWKS = jsontypes.NewNormalizedNull()
 	} else {
-		m.JWKS = jsontypes.NewNormalizedValue(string(sa.JWKS))
+		m.JWKS = jsontypes.NewNormalizedValue(jsonencodeForm(sa.JWKS))
 	}
 }
 

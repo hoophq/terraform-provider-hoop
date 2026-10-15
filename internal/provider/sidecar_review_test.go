@@ -48,7 +48,7 @@ func TestSidecarResourceFlipWithBoundRules(t *testing.T) {
 			},
 			{
 				PreConfig: func() {
-					gw.bind("sc-1", hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
+					gw.bind(hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
 				},
 				Config: sidecarListenerConfig("appdb", "postgres"),
 				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "1"),
@@ -88,7 +88,7 @@ func TestSidecarResourceKeepsBindingsWhenUnavailable(t *testing.T) {
 			},
 			{
 				PreConfig: func() {
-					gw.bind("sc-1", hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
+					gw.bind(hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
 				},
 				Config: sidecarListenerConfig("appdb", "postgres"),
 				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "1"),
@@ -102,6 +102,63 @@ func TestSidecarResourceKeepsBindingsWhenUnavailable(t *testing.T) {
 				},
 				Config:      sidecarListenerConfig("appdb-v2", "postgres"),
 				ExpectError: regexp.MustCompile(`Listener Change Breaks Bound Rules`),
+			},
+		},
+	})
+}
+
+// Bindings change outside the sidecar resource between plan and apply: a
+// rule bound to it destroyed earlier in the same apply, or another workspace
+// binding one. The update reads back what the gateway holds, and the plan
+// must not have promised the old bindings, or Terraform core fails the apply
+// with "Provider produced inconsistent result after apply".
+func TestSidecarResourceBindingsChangeDuringApply(t *testing.T) {
+	gw := newFakeSidecarGateway(t)
+	withReports := testProviderBlock + `
+resource "hoop_sidecar" "payments" {
+  name = "payments"
+  configuration = jsonencode({
+    listeners = [
+      { name = "appdb", protocol = "postgres", listen = "0.0.0.0:15432", upstream = "db:5432" },
+      { name = "reports", protocol = "postgres", listen = "0.0.0.0:15433", upstream = "reports:5432" },
+    ]
+  })
+}`
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: sidecarFactories(gw),
+		Steps: []resource.TestStep{
+			{
+				Config: sidecarListenerConfig("appdb", "postgres"),
+			},
+			{
+				PreConfig: func() {
+					gw.bind(hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
+				},
+				Config: sidecarListenerConfig("appdb", "postgres"),
+				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "1"),
+			},
+			// The binding goes away after the plan read it.
+			{
+				PreConfig: func() {
+					gw.mu.Lock()
+					gw.beforePut = func(sc *hoop.Sidecar) { sc.BoundRules = nil }
+					gw.mu.Unlock()
+				},
+				Config: withReports,
+				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "0"),
+			},
+			// A binding arrives after the plan read none.
+			{
+				PreConfig: func() {
+					gw.mu.Lock()
+					gw.beforePut = func(sc *hoop.Sidecar) {
+						sc.BoundRules = []hoop.SidecarRuleBinding{{Kind: "datamasking", Name: "emails", ListenerName: "appdb"}}
+					}
+					gw.mu.Unlock()
+				},
+				Config: sidecarListenerConfig("appdb", "postgres"),
+				Check:  resource.TestCheckResourceAttr("hoop_sidecar.payments", "bound_rules.#", "1"),
 			},
 		},
 	})

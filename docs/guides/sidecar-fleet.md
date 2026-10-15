@@ -182,7 +182,7 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
     high_risk   = { action = "block_execution" }
   }
   sidecar_spec = jsonencode({
-    trigger       = "statement"
+    trigger       = { operations = ["update", "delete"] }
     high          = "require_review"
     approval_rule = hoop_access_request_rule.dba_approvals.name
   })
@@ -190,7 +190,16 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
 }
 ```
 
-Leave `approval_rule` out and the analyzer rule holds under its own name: the gateway creates and manages the access request rule for it, and `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec` on `hoop_ai_session_analyzer_rule` drive it. Use a separate `hoop_access_request_rule` when several analyzer rules share one approval policy.
+Set `approval_rule` to the analyzer rule's own name and it holds under that name: the gateway creates and manages the access request rule for it, and `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec` on `hoop_ai_session_analyzer_rule` drive it. Those three are refused at plan in any other case, since the gateway would ignore them. A hold with no `approval_rule` at all is refused too: nobody could release the statement. Use a separate `hoop_access_request_rule` when several analyzer rules share one approval policy.
+
+`trigger` narrows which statements are classified, as an object such as `{ operations = ["update", "delete"] }`; leave it out to classify every statement. The sidecar classifies with the model its own configuration names, so a sidecar needs a top-level `analyzer` section (`provider`, `model`, `credentials_file`) before an analyzer rule can be bound to it:
+
+```terraform
+  configuration = jsonencode({
+    analyzer  = { provider = "anthropic", model = "claude-haiku-5-5", credentials_file = "/etc/hoop/anthropic-key" }
+    listeners = [ ... ]
+  })
+```
 
 Reviews raised this way are posted in Slack to the channels in `hoop_sidecar.slack_channels` for that listener.
 
@@ -243,11 +252,13 @@ terraform import hoop_guardrail.no_destructive <uuid>
 terraform import hoop_ai_session_analyzer_rule.appdb appdb-analysis   # by name
 ```
 
-An imported `hoop_sidecar` has no `token`; the gateway cannot return it. An imported rule has null `sidecar_targets` and `sidecar_spec` in state until the configuration declares them.
+An imported `hoop_sidecar` has no `token`; the gateway cannot return it. An imported rule has null `sidecar_targets` and `sidecar_spec` in state, an imported guardrail null `connection_ids` and `attributes`, an imported access request rule null `attributes`, and an imported analyzer rule null `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec`, as does an imported sidecar's `slack_channels`: import cannot tell whether the configuration owns them, and treating them as owned would unbind what was set outside Terraform. The first plan after an import shows the declared ones as added; that apply sends the same values back and changes nothing on the gateway.
+
+The same first plan can show two more changes that are not. Import stores a JSON document the way the gateway answers it, and Terraform compares the configuration as written, so zero values in a sidecar's `configuration` (`""`, `0`, `false`) show as added, and a `jwks` read with `file()` shows whitespace changes. That apply is a no-op on the gateway as well, and the plans after it are empty.
 
 ## Destroying a sidecar
 
-`terraform destroy` on a `hoop_sidecar` deletes it on the control plane and records its name. A pod that identifies itself with a platform token and maps to that name is refused from then on, so a fleet does not quietly recreate what an admin removed. To let the name be used again, clear it:
+`terraform destroy` on a `hoop_sidecar` deletes it on the control plane. When a service account identity had reached that sidecar, the control plane also records its name: a pod that identifies itself with a platform token and maps to that name is refused from then on, so a fleet does not quietly recreate what an admin removed. A sidecar only ever reached by its token is not recorded, and its name can be used again right away. To let a recorded name be used again, clear it:
 
 ```shell
 curl -X DELETE -H "Authorization: Bearer $HOOP_API_KEY" \
@@ -258,4 +269,4 @@ A sidecar that was only bound to an identity, with no `hoop_sidecar` resource, i
 
 ## Switching a sidecar back to its own file
 
-`load_from_disk = true` hands the document back to the sidecar's config file. The switch, in either direction, detaches every rule bound to the sidecar: rules that came from its file and nothing else uses are deleted, the rest are unbound. The plan warns with the count, and the apply lists each rule by name. Rules Terraform manages come back on the next apply; until then the sidecar runs without them.
+`load_from_disk = true` hands the document back to the sidecar's config file. The switch, in either direction, detaches every rule bound to the sidecar: rules that came from its file and nothing else uses are deleted, the rest are unbound. The plan warns with the count, and the apply lists each rule by name. Switching back off, the rules Terraform manages come back on the next apply; until then the sidecar runs without them. Switching on, the gateway refuses any rule bound to that sidecar, so remove it from the `sidecar_targets` of those rules in the same change.

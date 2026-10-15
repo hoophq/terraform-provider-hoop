@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
@@ -117,7 +118,9 @@ func (r *analyzerRuleResource) Schema(_ context.Context, _ resource.SchemaReques
 	resp.Schema = schema.Schema{
 		Description: "Manages an AI session analyzer rule. On the gateway the rule classifies the sessions of " +
 			"`connection_names` and applies `risk_evaluation`. On a sidecar fleet, `sidecar_spec` is the analyzer " +
-			"block a listener receives and `sidecar_targets` names the listeners; one rule per listener.",
+			"block a listener receives and `sidecar_targets` names the listeners; one rule per listener. A sidecar " +
+			"needs its own top-level `analyzer` section (provider, model, credential) in `configuration` before an " +
+			"analyzer rule can be bound to it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",
@@ -166,6 +169,9 @@ func (r *analyzerRuleResource) Schema(_ context.Context, _ resource.SchemaReques
 			"sidecar_targets": sidecarTargetsAttribute(),
 			"reviewers_groups": schema.ListAttribute{
 				Description: "The groups whose members may release a statement this rule holds for approval. " +
+					"Only for a rule whose `sidecar_spec` holds statements (`require_review`) with `approval_rule` set to " +
+					"this rule's `name`: the gateway then manages an access request rule under that name. With an " +
+					"`approval_rule` naming another rule, set the groups on that `hoop_access_request_rule`. " +
 					"With none set the admin group reviews. Leave the attribute out to keep groups set outside Terraform; " +
 					"removing a declared value clears them.",
 				ElementType: types.StringType,
@@ -173,7 +179,7 @@ func (r *analyzerRuleResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			"pending_ttl_sec": schema.Int64Attribute{
 				Description: "Seconds a held statement's review may wait for a decision, 60 to 604800. " +
-					"The gateway reads it only while `sidecar_spec` holds statements for approval.",
+					"Same conditions as `reviewers_groups`.",
 				Optional:   true,
 				Validators: reviewTTLValidator,
 			},
@@ -193,7 +199,11 @@ func (r *analyzerRuleResource) Schema(_ context.Context, _ resource.SchemaReques
 func (r *analyzerRuleResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data analyzerRuleResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() || data.RiskEvaluation.IsNull() || data.RiskEvaluation.IsUnknown() {
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	validateAnalyzerSidecarSpec(data, &resp.Diagnostics)
+	if data.RiskEvaluation.IsNull() || data.RiskEvaluation.IsUnknown() {
 		return
 	}
 	var eval riskEvaluationModel
@@ -221,6 +231,81 @@ func (r *analyzerRuleResource) ValidateConfig(ctx context.Context, req resource.
 				"Access Request Rule Not Allowed",
 				fmt.Sprintf("%s: access_request_rule_name is only allowed when action is require_access_request.", level))
 		}
+	}
+}
+
+// analyzerSidecarSpec is the part of a sidecar_spec the plan can check before
+// the gateway does.
+type analyzerSidecarSpec struct {
+	Trigger      json.RawMessage `json:"trigger"`
+	HighRisk     string          `json:"high"`
+	MediumRisk   string          `json:"medium"`
+	LowRisk      string          `json:"low"`
+	ApprovalRule string          `json:"approval_rule"`
+}
+
+// holds reports whether a risk level keeps a statement for a reviewer, in
+// either of the sidecar's spellings.
+func (s analyzerSidecarSpec) holds() bool {
+	for _, action := range []string{s.HighRisk, s.MediumRisk, s.LowRisk} {
+		if action == "require_review" || action == "require_approval" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAnalyzerSidecarSpec refuses at plan what the gateway refuses or
+// ignores at apply.
+//
+// reviewers_groups and the TTLs drive the access request rule the gateway
+// keeps beside an analyzer rule, and it keeps one only while sidecar_spec
+// holds statements and approval_rule names this rule. Otherwise it drops the
+// values and the apply ends in an inconsistent result.
+func validateAnalyzerSidecarSpec(data analyzerRuleResourceModel, diags *diag.Diagnostics) {
+	if data.SidecarSpec.IsUnknown() || data.Name.IsUnknown() {
+		return
+	}
+	var spec analyzerSidecarSpec
+	if !data.SidecarSpec.IsNull() {
+		if err := json.Unmarshal([]byte(data.SidecarSpec.ValueString()), &spec); err != nil {
+			// The attribute's type already refuses a document that does not
+			// parse; anything else is a shape the gateway reports.
+			return
+		}
+	}
+	if len(spec.Trigger) > 0 && spec.Trigger[0] == '"' {
+		diags.AddAttributeError(path.Root("sidecar_spec"), "Invalid Analyzer Trigger",
+			"sidecar_spec.trigger is an object that narrows which statements are classified, such as "+
+				"{ operations = [\"update\", \"delete\"] }, not a string. Leave it out to classify every statement.")
+	}
+	if spec.holds() && spec.ApprovalRule == "" {
+		diags.AddAttributeError(path.Root("sidecar_spec"), "Approval Rule Required",
+			"sidecar_spec holds statements for review (require_review) and names no approval_rule. "+
+				"Set approval_rule to this rule's name to have the gateway manage the approval rule from "+
+				"reviewers_groups, pending_ttl_sec and approval_ttl_sec, or to the name of a hoop_access_request_rule.")
+	}
+	ownRule := spec.holds() && spec.ApprovalRule == data.Name.ValueString()
+	for _, setting := range []struct {
+		name  string
+		value attr.Value
+	}{
+		{"reviewers_groups", data.ReviewersGroups},
+		{"pending_ttl_sec", data.PendingTTLSec},
+		{"approval_ttl_sec", data.ApprovalTTLSec},
+	} {
+		name := setting.name
+		if setting.value.IsNull() || setting.value.IsUnknown() || ownRule {
+			continue
+		}
+		reason := "sidecar_spec holds no statements for review"
+		if spec.holds() && spec.ApprovalRule != "" {
+			reason = fmt.Sprintf("sidecar_spec names the approval rule %q, which decides who reviews and for how long", spec.ApprovalRule)
+		}
+		diags.AddAttributeError(path.Root(name), "Review Setting Has No Effect",
+			fmt.Sprintf("%s only applies to the approval rule the gateway manages under this rule's name, and %s. "+
+				"Set it on that hoop_access_request_rule, or set sidecar_spec.approval_rule to %q.",
+				name, reason, data.Name.ValueString()))
 	}
 }
 
@@ -449,18 +534,28 @@ func (r *analyzerRuleResource) Delete(ctx context.Context, req resource.DeleteRe
 }
 
 // ImportState takes the rule name, which is how the gateway addresses it.
-// ModifyPlan warns when a declared sidecar_targets is removed, since the
-// write that follows unbinds the rule from every sidecar it named.
+// ModifyPlan refuses a write that would leave a bound rule without a sidecar
+// spec, and warns when a declared sidecar_targets is removed, since the write
+// that follows unbinds the rule from every sidecar it named.
 func (r *analyzerRuleResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+	if req.Plan.Raw.IsNull() {
 		return
 	}
-	var plan, state analyzerRuleResourceModel
+	var plan analyzerRuleResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if req.State.Raw.IsNull() {
+		refuseBoundRuleWithoutSpec(plan.SidecarSpec, jsontypes.NewNormalizedNull(), true, plan.SidecarTargets, &resp.Diagnostics)
+		return
+	}
+	var state analyzerRuleResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	refuseBoundRuleWithoutSpec(plan.SidecarSpec, state.SidecarSpec, false, plan.SidecarTargets, &resp.Diagnostics)
 	warnOnUnbind(ctx, "hoop_ai_session_analyzer_rule", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 

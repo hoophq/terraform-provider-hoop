@@ -16,6 +16,7 @@ Manages a guardrail rule. On the gateway, `input` and `output` inspect the sessi
 # Copyright (c) HashiCorp, Inc.
 
 # A guardrail enforced on the gateway, for the sessions of one connection.
+# connection_ids owns the link: leave guardrail_rules out of that connection.
 resource "hoop_guardrail" "no_drop" {
   name        = "no-drop"
   description = "Refuse DROP statements"
@@ -64,8 +65,8 @@ resource "hoop_guardrail" "no_destructive" {
 
 ### Optional
 
-- `attributes` (List of String) Attribute names this rule is associated with.
-- `connection_ids` (List of String) The connections this rule applies to on the gateway.
+- `attributes` (Set of String) Attribute names this rule is associated with. Leave the attribute out to keep attribute links made outside this resource, such as on the attribute itself; removing a declared value unlinks them. The gateway creates an attribute it does not know yet, and keeps it after the rule is deleted.
+- `connection_ids` (List of String) The connections this rule applies to on the gateway. Leave the attribute out to keep connections linked outside this resource, such as through `hoop_connection`'s `guardrail_rules`; removing a declared value unlinks them. Manage each link from one side only.
 - `description` (String) The rule description.
 - `input` (String) Rules applied to what the user sends, as a JSON object `{"rules": [{"type": "deny_words_list", "words": [...]}]}`. Omit it for a rule with no input checks.
 - `output` (String) Rules applied to what the connection returns, in the same shape as `input`. Omit it for a rule with no output checks.

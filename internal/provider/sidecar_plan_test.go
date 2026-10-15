@@ -3,7 +3,6 @@
 package provider
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -52,7 +51,7 @@ func TestSidecarResourceRefusesBreakingBoundListener(t *testing.T) {
 			// refresh reports it and the unchanged configuration plans nothing.
 			{
 				PreConfig: func() {
-					gw.bind("sc-1", hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
+					gw.bind(hoop.SidecarRuleBinding{Kind: "guardrail", Name: "no-delete", ListenerName: "appdb"})
 				},
 				Config: sidecarListenerConfig("appdb", "postgres"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -205,7 +204,7 @@ func TestPruneZero(t *testing.T) {
 }
 
 func TestWarnOnUnbind(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	targets := func(ids ...string) types.List {
 		items := make([]sidecarTargetModel, 0, len(ids))
 		for _, id := range ids {
@@ -248,5 +247,22 @@ func TestWarnOnUnbind(t *testing.T) {
 				t.Errorf("warning %q does not mention %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestJsonencodeForm: a document as Postgres jsonb renders it comes out the way
+// jsonencode writes it, so an imported value plans no whitespace-only change.
+// jsonencode escapes <, > and & as \u003c, \u003e and \u0026, as Go does.
+func TestJsonencodeForm(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{`{"listeners": [{"name": "appdb", "max_conns": 5}], "admin": {"listen": "127.0.0.1:19000"}}`,
+			`{"admin":{"listen":"127.0.0.1:19000"},"listeners":[{"max_conns":5,"name":"appdb"}]}`},
+		{`{"keys": [{"n": "a<b&c>d", "e": "AQAB", "big": 12345678901234567890}]}`,
+			"{\"keys\":[{\"big\":12345678901234567890,\"e\":\"AQAB\",\"n\":\"a\\u003cb\\u0026c\\u003ed\"}]}"},
+		{`not json`, `not json`},
+	} {
+		if got := jsonencodeForm([]byte(tt.in)); got != tt.want {
+			t.Errorf("jsonencodeForm(%s):\n got  %s\n want %s", tt.in, got, tt.want)
+		}
 	}
 }

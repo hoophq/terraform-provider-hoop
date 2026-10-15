@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -30,7 +31,7 @@ func TestAnalyzerRuleResource(t *testing.T) {
 resource "hoop_ai_session_analyzer_rule" "prod" {
   name             = "prod-analysis"
   connection_names = ["pg-prod"]` + analyzerRiskEvaluation + `
-  sidecar_spec     = jsonencode({ trigger = "statement", high = "block" })
+  sidecar_spec     = jsonencode({ trigger = { operations = ["delete"] }, high = "require_review", approval_rule = "prod-analysis" })
   sidecar_targets  = [{ sidecar_id = "sc-1", listener_name = "appdb" }]
   reviewers_groups = ["dba-leads"]
   pending_ttl_sec  = 900
@@ -59,7 +60,7 @@ resource "hoop_ai_session_analyzer_rule" "prod" {
 resource "hoop_ai_session_analyzer_rule" "prod" {
   name             = "prod-analysis"
   connection_names = ["pg-prod"]` + analyzerRiskEvaluation + `
-  sidecar_spec     = jsonencode({ trigger = "statement", high = "block" })
+  sidecar_spec     = jsonencode({ trigger = { operations = ["delete"] }, high = "require_review", approval_rule = "prod-analysis" })
   sidecar_targets  = [{ sidecar_id = "sc-1", listener_name = "appdb" }]
 }`,
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -82,4 +83,39 @@ resource "hoop_ai_session_analyzer_rule" "prod" {
 			},
 		},
 	})
+}
+
+// TestAnalyzerRuleResourceSidecarSpecValidation: what the gateway refuses, or
+// keeps and then drops, fails at plan instead of at apply.
+func TestAnalyzerRuleResourceSidecarSpecValidation(t *testing.T) {
+	gw := newFakeRuleGateway("/ai/session-analyzer/rules", true)
+	for _, tt := range []struct {
+		name, body, want string
+	}{
+		{"string trigger", `sidecar_spec = jsonencode({ trigger = "statement", high = "block" })`, `Invalid Analyzer Trigger`},
+		{"hold without an approval rule", `sidecar_spec = jsonencode({ high = "require_review" })`, `Approval Rule Required`},
+		{"reviewers under another rule", `
+  sidecar_spec     = jsonencode({ high = "require_review", approval_rule = "dba-approvals" })
+  reviewers_groups = ["dba-leads"]`, `(?s)Review Setting Has No Effect.*dba-approvals`},
+		{"ttl on a rule that holds nothing", `
+  sidecar_spec    = jsonencode({ high = "block" })
+  pending_ttl_sec = 900`, `(?s)Review Setting Has No Effect.*holds no statements`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resource.ParallelTest(t, resource.TestCase{
+				IsUnitTest: true,
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+				},
+				Steps: []resource.TestStep{{
+					Config: testProviderBlock + `
+resource "hoop_ai_session_analyzer_rule" "r" {
+  name = "r"` + analyzerRiskEvaluation + `
+  ` + tt.body + `
+}`,
+					ExpectError: regexp.MustCompile(tt.want),
+				}},
+			})
+		})
+	}
 }

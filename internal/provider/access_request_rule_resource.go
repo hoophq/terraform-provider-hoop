@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -24,6 +25,7 @@ var (
 	_ resource.Resource                   = &accessRequestRuleResource{}
 	_ resource.ResourceWithImportState    = &accessRequestRuleResource{}
 	_ resource.ResourceWithValidateConfig = &accessRequestRuleResource{}
+	_ resource.ResourceWithModifyPlan     = &accessRequestRuleResource{}
 )
 
 func NewAccessRequestRuleResource() resource.Resource {
@@ -38,7 +40,7 @@ type accessRequestRuleResourceModel struct {
 	Description            types.String `tfsdk:"description"`
 	AccessType             types.String `tfsdk:"access_type"`
 	ConnectionNames        types.List   `tfsdk:"connection_names"`
-	Attributes             types.List   `tfsdk:"attributes"`
+	Attributes             types.Set    `tfsdk:"attributes"`
 	ApprovalRequiredGroups types.List   `tfsdk:"approval_required_groups"`
 	AllGroupsMustApprove   types.Bool   `tfsdk:"all_groups_must_approve"`
 	ReviewersGroups        types.List   `tfsdk:"reviewers_groups"`
@@ -109,7 +111,14 @@ func (r *accessRequestRuleResource) Schema(_ context.Context, _ resource.SchemaR
 			},
 			"connection_names": groupListAttribute("The connections this rule gates. Required, or `attributes`, " +
 				"unless `access_type` is `sidecar`, which refuses it."),
-			"attributes": groupListAttribute("Attribute names this rule is associated with."),
+			"attributes": schema.SetAttribute{
+				Description: "Attribute names this rule is associated with. Leave the attribute out to keep " +
+					"attribute links made outside this resource, such as on the attribute itself; removing a " +
+					"declared value unlinks them. The gateway creates an attribute it does not know yet, and keeps " +
+					"it after the rule is deleted.",
+				ElementType: types.StringType,
+				Optional:    true,
+			},
 			"approval_required_groups": groupListAttribute("User groups whose members need approval. " +
 				"Empty makes every requester need approval."),
 			"all_groups_must_approve": schema.BoolAttribute{
@@ -148,6 +157,11 @@ func (r *accessRequestRuleResource) Schema(_ context.Context, _ resource.SchemaR
 					"rule holds under, empty otherwise. A managed rule accepts changes to its groups and approval " +
 					"counts only, and cannot be deleted.",
 				Computed: true,
+				// Who manages a rule does not change on an update, so the plan
+				// keeps it rather than showing it as known after apply.
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -165,7 +179,11 @@ func (r *accessRequestRuleResource) ValidateConfig(ctx context.Context, req reso
 	sidecar := data.AccessType.ValueString() == accessTypeSidecar
 	// A null list is an empty one on the wire; only an unknown list defers
 	// the check to apply.
-	count := func(l types.List) (n int, known bool) {
+	count := func(l interface {
+		IsNull() bool
+		IsUnknown() bool
+		Elements() []attr.Value
+	}) (n int, known bool) {
 		if l.IsUnknown() {
 			return 0, false
 		}
@@ -227,7 +245,7 @@ func (m *accessRequestRuleResourceModel) toApi(ctx context.Context, prior *acces
 	var d diag.Diagnostics
 	rule.ConnectionNames, d = toApiStringList(ctx, m.ConnectionNames)
 	diags.Append(d...)
-	rule.Attributes, d = toApiStringList(ctx, m.Attributes)
+	rule.Attributes, d = toApiStringSet(ctx, m.Attributes)
 	diags.Append(d...)
 	rule.ApprovalRequiredGroups, d = toApiStringList(ctx, m.ApprovalRequiredGroups)
 	diags.Append(d...)
@@ -259,7 +277,7 @@ func (m *accessRequestRuleResourceModel) fromApi(ctx context.Context, rule *hoop
 	m.AllGroupsMustApprove = types.BoolValue(rule.AllGroupsMustApprove)
 	m.ConnectionNames, d = fromApiStringList(ctx, m.ConnectionNames, rule.ConnectionNames)
 	diags.Append(d...)
-	m.Attributes, d = fromApiStringList(ctx, m.Attributes, rule.Attributes)
+	m.Attributes, d = fromApiOwnedStringSet(ctx, m.Attributes, rule.Attributes)
 	diags.Append(d...)
 	m.ApprovalRequiredGroups, d = fromApiStringList(ctx, m.ApprovalRequiredGroups, rule.ApprovalRequiredGroups)
 	diags.Append(d...)
@@ -365,6 +383,19 @@ func (r *accessRequestRuleResource) Update(ctx context.Context, req resource.Upd
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// The gateway replaces a rule's attribute links on every write and reads
+	// an absent key as none. A configuration that never declared attributes
+	// leaves those links to the attribute itself, so the write carries back
+	// the ones stored now.
+	if plan.Attributes.IsNull() && state.Attributes.IsNull() {
+		stored, err := r.client.GetAccessRequestRule(state.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Error Reading Access Request Rule",
+				fmt.Sprintf("Failed to read the attribute links of access request rule %q before updating it: %v", plan.Name.ValueString(), err))
+			return
+		}
+		payload.Attributes = orEmpty(stored.Attributes)
+	}
 	rule, err := r.client.UpdateAccessRequestRule(payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Updating Access Request Rule",
@@ -376,6 +407,41 @@ func (r *accessRequestRuleResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// managedByAnalyzer is the managed_by of the rule an analyzer rule holds
+// statements under, which the gateway creates and keeps for that rule.
+const managedByAnalyzer = "ai-session-analyzer"
+
+// ModifyPlan warns before a write to, or a destroy of, a rule the gateway
+// manages. An analyzer rule owns the groups and review limits of the rule it
+// holds under, so a second resource writing them overwrites, and is
+// overwritten by, the next apply of that analyzer rule. A managed rule cannot
+// be deleted either. A plan that leaves the rule alone says nothing.
+func (r *accessRequestRuleResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.Equal(req.State.Raw) {
+		return
+	}
+	var state accessRequestRuleResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() || state.ManagedBy.ValueString() == "" {
+		return
+	}
+	name := state.Name.ValueString()
+	detail := fmt.Sprintf("Access request rule %q is managed by %s and accepts changes to its groups and approval "+
+		"counts only. ", name, state.ManagedBy.ValueString())
+	if state.ManagedBy.ValueString() == managedByAnalyzer {
+		detail = fmt.Sprintf("Access request rule %q is managed for the analyzer rule of the same name. Set "+
+			"reviewers_groups, pending_ttl_sec and approval_ttl_sec on that hoop_ai_session_analyzer_rule instead: "+
+			"two resources writing them overwrite each other on every apply. ", name)
+	}
+	if req.Plan.Raw.IsNull() {
+		detail += "The gateway refuses to delete a managed rule; remove it from state with `terraform state rm`, " +
+			"or remove what manages it."
+	} else {
+		detail += "Remove this resource from state with `terraform state rm` and manage the rule where it is owned."
+	}
+	resp.Diagnostics.AddWarning("Access Request Rule Is Managed", detail)
 }
 
 // Delete removes the rule. A managed rule cannot be deleted on the gateway;

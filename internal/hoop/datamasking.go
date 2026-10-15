@@ -17,6 +17,10 @@ type DataMaskingRule struct {
 	ConnectionIDs        []string                    `json:"connection_ids"`
 	SupportedEntityTypes []SupportedEntityTypesEntry `json:"supported_entity_types"`
 	CustomEntityTypes    []CustomEntityTypesEntry    `json:"custom_entity_types"`
+	// Attributes is read only to be written back: the gateway replaces a
+	// rule's attribute links on every write and reads an absent key as none,
+	// and the resource does not manage them.
+	Attributes []string `json:"attributes,omitempty"`
 	// SidecarSpec is the rule in the sidecar's vocabulary, the mask block a
 	// listener receives. Nil keeps what the gateway stores; an explicit JSON
 	// null clears it.

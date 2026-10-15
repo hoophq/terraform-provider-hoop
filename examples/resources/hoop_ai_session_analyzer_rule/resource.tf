@@ -17,7 +17,10 @@ resource "hoop_ai_session_analyzer_rule" "prod" {
 
 # Statement analysis on a sidecar listener. sidecar_spec is the analyzer block
 # the listener receives; a held statement waits up to 15 minutes for one of
-# the dba-leads to release it.
+# the dba-leads to release it. approval_rule names this rule itself, so the
+# gateway manages the approval rule from reviewers_groups and pending_ttl_sec.
+# The sidecar's configuration needs a top-level analyzer section (provider,
+# model, credential) before the rule can be bound to it.
 resource "hoop_ai_session_analyzer_rule" "appdb" {
   name = "appdb-analysis"
 
@@ -28,8 +31,9 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
   }
 
   sidecar_spec = jsonencode({
-    trigger = "statement"
-    high    = "defer"
+    trigger       = { operations = ["update", "delete"] }
+    high          = "require_review"
+    approval_rule = "appdb-analysis"
   })
 
   sidecar_targets  = [{ sidecar_id = hoop_sidecar.payments.id, listener_name = "appdb" }]

@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -121,8 +120,9 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"name": schema.StringAttribute{
 				Description: "The sidecar name, unique in the organization. Changing it replaces the sidecar and its token. " +
-					"Destroying a sidecar records its name, and an identity that maps to that name is refused until an " +
-					"admin clears it with `DELETE /api/sidecar-deleted-names/{name}`.",
+					"Destroying a sidecar that a service account identity reached records its name, and an identity " +
+					"that maps to that name is refused until an admin clears it with " +
+					"`DELETE /api/sidecar-deleted-names/{name}`. A sidecar only ever reached by its token is not recorded.",
 				Required:   true,
 				Validators: NonEmptyStringValidator,
 				PlanModifiers: []planmodifier.String{
@@ -133,7 +133,9 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "The sidecar configuration document as a JSON object, in the schema of the sidecar " +
 					"config file: `listeners`, `admin`, `audit` and so on. `jsonencode(yamldecode(file(\"sidecar.yaml\")))` " +
 					"converts an existing file. The gateway drops zero values from the stored document; the plan " +
-					"compares past them, so `\"\"`, `0`, `false` and empty blocks are harmless. Omit the attribute to " +
+					"compares past them, so `\"\"`, `0`, `false` and empty blocks are harmless. The exception is the " +
+					"first plan after an import, which shows them as added; that apply changes nothing on the gateway. " +
+					"Omit the attribute to " +
 					"store an empty document; the sidecar then refuses to start until one is set. " +
 					"Do not put `load_from_disk` here; use the attribute.",
 				CustomType: sidecarConfigType{},
@@ -186,28 +188,25 @@ func (r *sidecarResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "Why the sidecar refused the last configuration, or why the control plane did not serve it.",
 				Computed:    true,
 			},
+			// The identity fields and bound_rules change through other objects:
+			// a pod's first handshake, a rule resource's sidecar_targets. They
+			// are not UseStateForUnknown, because an update would then promise
+			// the prior value and fail with an inconsistent result whenever
+			// something else changed them between plan and apply, such as a
+			// bound rule destroyed earlier in the same apply.
 			"identity_issuer": schema.StringAttribute{
 				Description: "The issuer of the service account identity bound to this sidecar, if one reached it.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"identity_subject": schema.StringAttribute{
 				Description: "The subject of the service account identity bound to this sidecar, if one reached it.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"bound_rules": schema.ListNestedAttribute{
 				Description: "The rules the control plane folds into this sidecar's configuration, read from the " +
 					"gateway. The rule resources own them through `sidecar_targets`; this is a view. The plan " +
 					"refuses a `configuration` change that removes, renames or re-protocols a listener named here.",
 				Computed: true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.UseStateForUnknown(),
-				},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"kind": schema.StringAttribute{
@@ -291,13 +290,10 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 	// The owner switch detaches every rule bound to this sidecar, in either
-	// direction, so after the apply bound_rules is whatever the gateway kept:
-	// unknown now, and no listener is protected by a binding the switch
-	// removes. Say so while the operator can still stop, and skip the guard.
+	// direction, so no listener is protected by a binding the switch removes.
+	// Say so while the operator can still stop, and skip the guard. The plan
+	// already holds bound_rules unknown, as for every update.
 	flipping := plan.LoadFromDisk.IsUnknown() || plan.LoadFromDisk.ValueBool() != state.LoadFromDisk.ValueBool()
-	if flipping {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("bound_rules"), types.ListUnknown(sidecarRuleBindingObjectType))...)
-	}
 	if state.BoundRules.IsNull() {
 		if !state.Configuration.IsNull() && !flipping && !state.Configuration.Equal(plan.Configuration) {
 			resp.Diagnostics.AddAttributeWarning(path.Root("configuration"), "Sidecar Bindings Unknown",
@@ -314,8 +310,8 @@ func (r *sidecarResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if flipping {
 		resp.Diagnostics.AddAttributeWarning(path.Root("load_from_disk"), "Owner Switch Detaches Bound Rules",
 			fmt.Sprintf("Changing load_from_disk unbinds the %d rule(s) bound to sidecar %q. Rules imported from this "+
-				"sidecar's file that nothing else uses are deleted. Rules managed by Terraform are recreated or rebound "+
-				"on the next apply; the sidecar runs without them until then.", len(bound), state.Name.ValueString()))
+				"sidecar's file that nothing else uses are deleted. %s",
+				len(bound), state.Name.ValueString(), afterOwnerSwitch(plan.LoadFromDisk.ValueBool())))
 		return
 	}
 	before := listenerProtocols(state.Configuration)
@@ -448,7 +444,7 @@ func (r *sidecarResource) readSidecarInto(ctx context.Context, model *sidecarRes
 	if model.Configuration.IsNull() && string(doc) == "{}" {
 		model.Configuration = newSidecarConfigNull()
 	} else {
-		model.Configuration = newSidecarConfigValue(string(doc))
+		model.Configuration = newSidecarConfigValue(jsonencodeForm(doc))
 	}
 	// Bindings the gateway could not read are not "none". Keep what the last
 	// read knew, so the listener guard still has something to check; with no
@@ -621,7 +617,7 @@ func (r *sidecarResource) Update(ctx context.Context, req resource.UpdateRequest
 				fmt.Sprintf("Failed to set load_from_disk to %s on sidecar %q: %v", flag, plan.Name.ValueString(), err))
 			return
 		}
-		reportDetachedRules(plan.Name.ValueString(), switched.DetachedRules, &resp.Diagnostics)
+		reportDetachedRules(plan.Name.ValueString(), plan.LoadFromDisk.ValueBool(), switched.DetachedRules, &resp.Diagnostics)
 	}
 
 	doc, err := documentForWrite(plan.Configuration, plan.LoadFromDisk.ValueBool())
@@ -695,11 +691,22 @@ func (r *sidecarResource) Configure(_ context.Context, req resource.ConfigureReq
 	r.client = client
 }
 
+// afterOwnerSwitch says what becomes of the rules Terraform manages once an
+// owner switch detached them. Switched off, the next apply binds them again.
+// Switched on, the gateway refuses any rule bound to the sidecar, so their
+// sidecar_targets must stop naming it.
+func afterOwnerSwitch(loadFromDisk bool) string {
+	if loadFromDisk {
+		return "While load_from_disk is on, the gateway refuses rules bound to this sidecar: remove it from the " +
+			"sidecar_targets of the rules Terraform manages, or their next apply fails."
+	}
+	return "Rules managed by Terraform are recreated or rebound on the next apply; the sidecar runs without them until then."
+}
+
 // reportDetachedRules turns the PATCH answer of an owner switch into a
-// warning naming each rule it deleted or unbound. A deleted rule that
-// Terraform manages comes back on the next apply; an unbound one is rebound
-// when its sidecar_targets are applied again.
-func reportDetachedRules(sidecar string, detached *hoop.SidecarDetachedRules, diags *diag.Diagnostics) {
+// warning naming each rule it deleted or unbound, and what the rules
+// Terraform manages need next (afterOwnerSwitch).
+func reportDetachedRules(sidecar string, loadFromDisk bool, detached *hoop.SidecarDetachedRules, diags *diag.Diagnostics) {
 	if detached.Empty() {
 		return
 	}
@@ -718,7 +725,6 @@ func reportDetachedRules(sidecar string, detached *hoop.SidecarDetachedRules, di
 	add("deleted", detached.Deleted)
 	add("unbound", detached.Unbound)
 	diags.AddAttributeWarning(path.Root("load_from_disk"), "Owner Switch Detached Rules",
-		fmt.Sprintf("Switching load_from_disk on sidecar %q detached these rules:\n\n%s\n\n"+
-			"Run terraform plan to see which of them Terraform will recreate or rebind.",
-			sidecar, strings.Join(lines, "\n")))
+		fmt.Sprintf("Switching load_from_disk on sidecar %q detached these rules:\n\n%s\n\n%s",
+			sidecar, strings.Join(lines, "\n"), afterOwnerSwitch(loadFromDisk)))
 }
