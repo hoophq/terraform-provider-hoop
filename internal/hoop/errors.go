@@ -3,9 +3,11 @@
 package hoop
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // APIError is returned when the Hoop Gateway answers with an unexpected status
@@ -44,12 +46,33 @@ func (e *APIError) hint() string {
 			"This header only works with the gateway's legacy API_KEY environment variable, and the value must match it exactly. " +
 			`Organization API keys (prefixed hpk_) must be sent as a bearer token — remove auth_scheme = "api_key" to let the provider select the scheme.`
 	case http.StatusForbidden:
+		if e.IsLicenseRefusal() {
+			return "The gateway refused this request because the organization has no valid Enterprise license. " +
+				"Sidecar and sidecar service account resources need one. Add it under Settings > License."
+		}
 		if e.AuthScheme == AuthSchemeBearer {
 			return "The organization API key authenticated but is not allowed to perform this operation. " +
 				"Organization API keys only carry the groups assigned to them: grant the key the admin group under Settings > API Keys to manage provider resources."
 		}
 	}
 	return ""
+}
+
+// IsLicenseRefusal reports whether the gateway answered 403 for a missing
+// Enterprise license. The gateway uses 403 for that and for a missing admin
+// group, and only the payload tells them apart. A resource must not read this
+// one as "gone": the sidecar still exists, the organization lost its license.
+func (e *APIError) IsLicenseRefusal() bool {
+	return e.StatusCode == http.StatusForbidden &&
+		strings.Contains(e.Payload, "requires a valid enterprise license")
+}
+
+// IsNotFound reports whether err is a gateway 404. A resource Read uses it to
+// drop a record something else deleted, so the next plan recreates it instead
+// of failing.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 // newAPIError drains resp and builds the error describing it. The caller keeps

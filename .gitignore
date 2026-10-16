@@ -36,3 +36,5 @@ website/vendor
 
 # ignore development files
 dev/
+# local credentials
+.api-key

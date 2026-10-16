@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -21,6 +22,7 @@ import (
 var (
 	_ resource.Resource                = &datamaskingRulesResource{}
 	_ resource.ResourceWithImportState = &datamaskingRulesResource{}
+	_ resource.ResourceWithModifyPlan  = &datamaskingRulesResource{}
 )
 
 // NewDatamaskingRulesResource is a helper function to simplify the provider implementation.
@@ -30,13 +32,15 @@ func NewDatamaskingRulesResource() resource.Resource {
 
 // datamaskingRulesResourceModel maps the data source schema data.
 type datamaskingRulesResourceModel struct {
-	ID                   types.String  `tfsdk:"id"`
-	Name                 types.String  `tfsdk:"name"`
-	Description          types.String  `tfsdk:"description"`
-	ScoreThreshold       types.Float64 `tfsdk:"score_threshold"`
-	SupportedEntityTypes types.List    `tfsdk:"supported_entity_types"`
-	CustomEntityTypes    types.List    `tfsdk:"custom_entity_types"`
-	ConnectionIDs        types.List    `tfsdk:"connection_ids"`
+	ID                   types.String         `tfsdk:"id"`
+	Name                 types.String         `tfsdk:"name"`
+	Description          types.String         `tfsdk:"description"`
+	ScoreThreshold       types.Float64        `tfsdk:"score_threshold"`
+	SupportedEntityTypes types.List           `tfsdk:"supported_entity_types"`
+	CustomEntityTypes    types.List           `tfsdk:"custom_entity_types"`
+	ConnectionIDs        types.List           `tfsdk:"connection_ids"`
+	SidecarSpec          jsontypes.Normalized `tfsdk:"sidecar_spec"`
+	SidecarTargets       types.List           `tfsdk:"sidecar_targets"`
 }
 
 // datamaskingRulesResource is the data source implementation.
@@ -52,7 +56,10 @@ func (r *datamaskingRulesResource) Metadata(_ context.Context, req resource.Meta
 // Schema defines the schema for the data source.
 func (r *datamaskingRulesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages Datamasking Rules resources.",
+		Description: "Manages a data masking rule. On the gateway it masks the sessions of `connection_ids`. " +
+			"On a sidecar fleet, `sidecar_spec` is the mask block a listener receives and `sidecar_targets` names " +
+			"the listeners. Bound masking rules replace the listener's own mask block; several rules on one " +
+			"listener concatenate into it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "The unique identifier of the resource.",
@@ -125,6 +132,8 @@ func (r *datamaskingRulesResource) Schema(_ context.Context, _ resource.SchemaRe
 				Description: "List of connection IDs which this rule applies to.",
 				Required:    true,
 			},
+			"sidecar_spec":    sidecarSpecAttribute(),
+			"sidecar_targets": sidecarTargetsAttribute(),
 		},
 	}
 }
@@ -170,12 +179,25 @@ func (r *datamaskingRulesResource) Read(ctx context.Context, req resource.ReadRe
 	currentState.Name = types.StringValue(rule.Name)
 	currentState.Description = types.StringValue(rule.Description)
 	currentState.ScoreThreshold = types.Float64Value(ptrToFloat64(rule.ScoreThreshold))
-	currentState.ConnectionIDs, diags = types.ListValueFrom(ctx, types.StringType, rule.ConnectionIDs)
+	// The gateway answers null for a rule with no connections, and the
+	// attribute is required, so the configuration spells that as []. Reading
+	// null into state would plan a change on every run of a sidecar-only rule.
+	connectionIDs := rule.ConnectionIDs
+	if connectionIDs == nil {
+		connectionIDs = []string{}
+	}
+	currentState.ConnectionIDs, diags = types.ListValueFrom(ctx, types.StringType, connectionIDs)
 	if diags.HasError() {
 		resp.Diagnostics.AddError(
 			"Error Converting Connection IDs",
 			fmt.Sprintf("Failed to convert connection IDs: %v", diags),
 		)
+		return
+	}
+	currentState.SidecarSpec = fromApiJSON(currentState.SidecarSpec, rule.SidecarSpec)
+	currentState.SidecarTargets, diags = fromApiSidecarTargets(ctx, currentState.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -230,6 +252,12 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 		}
 	}
 
+	sidecarTargets, diags := toApiSidecarTargets(ctx, plan.SidecarTargets, types.ListNull(sidecarTargetObjectType))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	rule, err := r.client.CreateDatamaskingRule(hoop.DataMaskingRule{
 		ID:                   plan.ID.ValueString(),
 		Name:                 plan.Name.ValueString(),
@@ -238,6 +266,8 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 		ConnectionIDs:        connectionIDs,
 		SupportedEntityTypes: supportedEntityTypeItems,
 		CustomEntityTypes:    customEntityTypeItems,
+		SidecarSpec:          toApiJSON(plan.SidecarSpec, jsontypes.NewNormalizedNull()),
+		SidecarTargets:       sidecarTargets,
 	})
 
 	if err != nil {
@@ -249,6 +279,12 @@ func (r *datamaskingRulesResource) Create(ctx context.Context, req resource.Crea
 	}
 
 	plan.ID = types.StringValue(rule.ID)
+	plan.SidecarSpec = fromApiJSON(plan.SidecarSpec, rule.SidecarSpec)
+	plan.SidecarTargets, diags = fromApiSidecarTargets(ctx, plan.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, &plan)
@@ -302,6 +338,30 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		}
 	}
 
+	var state datamaskingRulesResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	sidecarTargets, diags := toApiSidecarTargets(ctx, plan.SidecarTargets, state.SidecarTargets)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// The gateway replaces a rule's attribute links on every write and reads
+	// an absent key as none. The resource does not manage them, so they go
+	// back as stored, or every update would unlink the attributes set in the
+	// UI.
+	stored, err := r.client.GetDatamaskingRule(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error Reading Data Masking Rule",
+			fmt.Sprintf("Failed to read the attribute links of data masking rule %q before updating it: %v", plan.Name.ValueString(), err),
+		)
+		return
+	}
+
 	rule, err := r.client.UpdateDatamaskingRule(hoop.DataMaskingRule{
 		ID:                   plan.ID.ValueString(),
 		Name:                 plan.Name.ValueString(),
@@ -310,6 +370,9 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 		ConnectionIDs:        connectionIDs,
 		SupportedEntityTypes: supportedEntityTypeItems,
 		CustomEntityTypes:    customEntityTypeItems,
+		Attributes:           stored.Attributes,
+		SidecarSpec:          toApiJSON(plan.SidecarSpec, state.SidecarSpec),
+		SidecarTargets:       sidecarTargets,
 	})
 
 	if err != nil {
@@ -324,6 +387,12 @@ func (r *datamaskingRulesResource) Update(ctx context.Context, req resource.Upda
 	plan.Name = types.StringValue(rule.Name)
 	plan.Description = types.StringValue(rule.Description)
 	plan.ScoreThreshold = types.Float64Value(*rule.ScoreThreshold)
+	plan.SidecarSpec = fromApiJSON(plan.SidecarSpec, rule.SidecarSpec)
+	plan.SidecarTargets, diags = fromApiSidecarTargets(ctx, plan.SidecarTargets, hoop.TargetsOf(rule.SidecarTargets))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -348,6 +417,31 @@ func (r *datamaskingRulesResource) Delete(ctx context.Context, req resource.Dele
 		)
 		return
 	}
+}
+
+// ModifyPlan refuses a write that would leave a bound rule without a sidecar
+// spec, and warns when a declared sidecar_targets is removed, since the write
+// that follows unbinds the rule from every sidecar it named.
+func (r *datamaskingRulesResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan datamaskingRulesResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if req.State.Raw.IsNull() {
+		refuseBoundRuleWithoutSpec(plan.SidecarSpec, jsontypes.NewNormalizedNull(), true, plan.SidecarTargets, &resp.Diagnostics)
+		return
+	}
+	var state datamaskingRulesResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	refuseBoundRuleWithoutSpec(plan.SidecarSpec, state.SidecarSpec, false, plan.SidecarTargets, &resp.Diagnostics)
+	warnOnUnbind(ctx, "hoop_datamasking_rules", state.Name.ValueString(), plan.SidecarTargets, state.SidecarTargets, &resp.Diagnostics)
 }
 
 func (r *datamaskingRulesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

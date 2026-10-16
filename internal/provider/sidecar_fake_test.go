@@ -1,0 +1,606 @@
+// Copyright (c) HashiCorp, Inc.
+
+package provider
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
+)
+
+// recordedRequest is one call the fake gateway saw. The sidecar tests assert
+// on bodies, because the gateway reads an absent key, an empty list and a
+// null differently and only the bytes on the wire prove which one went out.
+type recordedRequest struct {
+	Method string
+	Path   string
+	Body   []byte
+}
+
+type requestRecorder struct {
+	mu   sync.Mutex
+	seen []recordedRequest
+}
+
+func (r *requestRecorder) record(req *http.Request) []byte {
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+		req.Body = io.NopCloser(strings.NewReader(string(body)))
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, recordedRequest{Method: req.Method, Path: req.URL.Path, Body: body})
+	return body
+}
+
+// last returns the most recent request matching method and path suffix.
+func (r *requestRecorder) last(method, pathSuffix string) (recordedRequest, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.seen) - 1; i >= 0; i-- {
+		if r.seen[i].Method == method && strings.HasSuffix(r.seen[i].Path, pathSuffix) {
+			return r.seen[i], true
+		}
+	}
+	return recordedRequest{}, false
+}
+
+// writes lists the non-GET methods seen, in order, for requests whose path has
+// the suffix. It is how a test proves the PATCH went out before the PUT, with
+// the refresh reads around them left out.
+func (r *requestRecorder) writes(pathSuffix string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, req := range r.seen {
+		if req.Method != http.MethodGet && strings.HasSuffix(req.Path, pathSuffix) {
+			out = append(out, req.Method)
+		}
+	}
+	return out
+}
+
+func (r *requestRecorder) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = nil
+}
+
+// checkLastBody asserts on the JSON keys of the most recent request matching
+// method and path suffix. want maps a key to its expected raw JSON, with the
+// value "<absent>" meaning the key must not be present.
+func checkLastBody(rec *requestRecorder, method, pathSuffix string, want map[string]string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		req, ok := rec.last(method, pathSuffix)
+		if !ok {
+			return fmt.Errorf("no %s request with path suffix %q was recorded", method, pathSuffix)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(req.Body, &body); err != nil {
+			return fmt.Errorf("%s %s body is not a JSON object: %v", method, req.Path, err)
+		}
+		for key, wantRaw := range want {
+			got, present := body[key]
+			if wantRaw == "<absent>" {
+				if present {
+					return fmt.Errorf("%s %s: key %q must be absent, got %s", method, req.Path, key, got)
+				}
+				continue
+			}
+			if !present {
+				return fmt.Errorf("%s %s: key %q is absent, want %s", method, req.Path, key, wantRaw)
+			}
+			if !jsonEqual(got, json.RawMessage(wantRaw)) {
+				return fmt.Errorf("%s %s: key %q: got %s, want %s", method, req.Path, key, got, wantRaw)
+			}
+		}
+		return nil
+	}
+}
+
+func checkWrites(rec *requestRecorder, pathSuffix string, want ...string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		got := rec.writes(pathSuffix)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			return fmt.Errorf("writes on %q: got %v, want %v", pathSuffix, got, want)
+		}
+		return nil
+	}
+}
+
+// resetRecorder clears the recorder at the end of a step, so the next step
+// asserts on its own requests only.
+func resetRecorder(rec *requestRecorder) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		rec.reset()
+		return nil
+	}
+}
+
+func jsonEqual(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	ax, _ := json.Marshal(x)
+	by, _ := json.Marshal(y)
+	return string(ax) == string(by)
+}
+
+func lastPathSegment(p string) string {
+	parts := strings.Split(strings.TrimSuffix(p, "/"), "/")
+	return parts[len(parts)-1]
+}
+
+// fakeSidecarGateway serves /sidecars and /sidecars/{nameOrID}/slack-channels
+// the way the gateway does: a one-time token on create, the stored document
+// echoed with load_from_disk inside it, PATCH as a merge, PUT as a replace
+// that refuses a load_from_disk flip, and slack channels as a per-listener
+// merge where an empty list deletes.
+type fakeSidecarGateway struct {
+	t        *testing.T
+	rec      *requestRecorder
+	mu       sync.Mutex
+	byID     map[string]*hoop.Sidecar
+	channels map[string]map[string][]string
+	nextID   int
+	license  fakeLicense
+	// failSlack makes every slack channel write answer 500, the failure a
+	// plan cannot see coming.
+	failSlack bool
+	// beforePut runs on a configuration PUT before it is stored. It stands in
+	// for what changes between plan and apply: a bound rule destroyed earlier
+	// in the same apply, or another actor binding one.
+	beforePut func(sc *hoop.Sidecar)
+}
+
+// bind records a rule binding the way the rule API would, so the next read
+// of the sidecar reports it under bound_rules. It binds to the first sidecar
+// the fake created, sc-1, which is the one a binding test manages.
+func (g *fakeSidecarGateway) bind(b hoop.SidecarRuleBinding) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	sc := g.byID["sc-1"]
+	sc.BoundRules = append(sc.BoundRules, b)
+}
+
+func newFakeSidecarGateway(t *testing.T) *fakeSidecarGateway {
+	return &fakeSidecarGateway{
+		t:        t,
+		rec:      &requestRecorder{},
+		byID:     map[string]*hoop.Sidecar{},
+		channels: map[string]map[string][]string{},
+	}
+}
+
+func (g *fakeSidecarGateway) find(nameOrID string) *hoop.Sidecar {
+	for _, sc := range g.byID {
+		if sc.ID == nameOrID || sc.Name == nameOrID {
+			return sc
+		}
+	}
+	return nil
+}
+
+func docFlag(raw json.RawMessage) bool {
+	var doc map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &doc)
+	return string(doc["load_from_disk"]) == "true"
+}
+
+// view is what every answer carries: the stored row plus the handshake fields
+// a live gateway derives. One shape for POST, GET, PUT and PATCH keeps the
+// state Terraform writes after an apply equal to what the next refresh reads.
+func view(sc *hoop.Sidecar) hoop.Sidecar {
+	out := *sc
+	out.Version = "1.0.0"
+	out.ConfigState = "applied"
+	return out
+}
+
+// storedDocument is what the gateway keeps of a document: decoded into its
+// struct and re-encoded with every zero value omitted. pruneZero is the
+// provider's model of that encoder; using it here makes the fake answer
+// what a live gateway answered in the smoke run, and the resource-level
+// assertion is that the plan stays empty.
+func storedDocument(raw json.RawMessage) json.RawMessage {
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return raw
+	}
+	pruned, _ := pruneZero(doc, "")
+	out, _ := json.Marshal(pruned)
+	return out
+}
+
+// fakeLicense answers /serverinfo. The zero value reports a valid Enterprise
+// license, which is what every test needs unless it is about the license.
+// none answers no license_info at all, the shape of a gateway from before
+// the field.
+type fakeLicense struct {
+	typ    string
+	valid  bool
+	status string
+	set    bool
+	none   bool
+}
+
+func (l *fakeLicense) serve(req *http.Request) *http.Response {
+	if !strings.HasSuffix(req.URL.Path, "/serverinfo") {
+		return nil
+	}
+	if l.none {
+		return httpTestOk(http.StatusOK, hoop.ServerInfo{})
+	}
+	info := hoop.ServerLicenseInfo{Type: "enterprise", IsValid: true, Status: "valid"}
+	if l.set {
+		info = hoop.ServerLicenseInfo{Type: l.typ, IsValid: l.valid, Status: l.status}
+	}
+	return httpTestOk(http.StatusOK, hoop.ServerInfo{LicenseInfo: &info})
+}
+
+// listenerNames reads the listener names of a stored document.
+func listenerNames(raw json.RawMessage) map[string]bool {
+	var doc struct {
+		Listeners []struct {
+			Name string `json:"name"`
+		} `json:"listeners"`
+	}
+	_ = json.Unmarshal(raw, &doc)
+	out := map[string]bool{}
+	for _, l := range doc.Listeners {
+		out[l.Name] = true
+	}
+	return out
+}
+
+func (g *fakeSidecarGateway) handle(req *http.Request) (*http.Response, error) {
+	body := g.rec.record(req)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if resp := g.license.serve(req); resp != nil {
+		return resp, nil
+	}
+	switch {
+	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/sidecars"):
+		var in struct {
+			Name          string          `json:"name"`
+			Configuration json.RawMessage `json:"configuration"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		if g.find(in.Name) != nil {
+			return httpTestErr(http.StatusConflict, "sidecar %q already exists", in.Name), nil
+		}
+		g.nextID++
+		cfg := in.Configuration
+		if len(cfg) == 0 {
+			cfg = json.RawMessage("{}")
+		}
+		sc := &hoop.Sidecar{ID: fmt.Sprintf("sc-%d", g.nextID), Name: in.Name, Configuration: storedDocument(cfg)}
+		g.byID[sc.ID] = sc
+		return httpTestOk(http.StatusCreated, hoop.SidecarCreated{Sidecar: view(sc), Token: "hsc_" + sc.ID}), nil
+
+	case strings.HasSuffix(req.URL.Path, "/slack-channels"):
+		parts := strings.Split(req.URL.Path, "/")
+		sc := g.find(parts[len(parts)-2])
+		if sc == nil {
+			return httpTestErr(http.StatusNotFound, "sidecar not found"), nil
+		}
+		if req.Method == http.MethodPut {
+			if g.failSlack {
+				return httpTestErr(http.StatusInternalServerError, "test: slack channels unavailable"), nil
+			}
+			var in hoop.SidecarSlackChannels
+			if err := json.Unmarshal(body, &in); err != nil {
+				return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+			}
+			// A listener must exist in the stored configuration (slackChannelRows).
+			known := listenerNames(sc.Configuration)
+			for _, l := range in.Listeners {
+				if _, ok := known[l.Name]; !ok {
+					return httpTestErr(http.StatusUnprocessableEntity, "sidecar %s has no listener named %q", sc.Name, l.Name), nil
+				}
+			}
+			if g.channels[sc.ID] == nil {
+				g.channels[sc.ID] = map[string][]string{}
+			}
+			for _, l := range in.Listeners {
+				if len(l.Channels) == 0 {
+					delete(g.channels[sc.ID], l.Name)
+					continue
+				}
+				g.channels[sc.ID][l.Name] = l.Channels
+			}
+		}
+		out := hoop.SidecarSlackChannels{Listeners: []hoop.SidecarListenerSlackChannels{}}
+		for name, ids := range g.channels[sc.ID] {
+			out.Listeners = append(out.Listeners, hoop.SidecarListenerSlackChannels{Name: name, Channels: ids})
+		}
+		return httpTestOk(http.StatusOK, out), nil
+	}
+
+	sc := g.find(lastPathSegment(req.URL.Path))
+	if sc == nil {
+		return httpTestErr(http.StatusNotFound, "sidecar not found"), nil
+	}
+	switch req.Method {
+	case http.MethodGet:
+		return httpTestOk(http.StatusOK, view(sc)), nil
+	case http.MethodPut:
+		var in struct {
+			Configuration json.RawMessage `json:"configuration"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		if docFlag(sc.Configuration) != docFlag(in.Configuration) {
+			return httpTestErr(http.StatusUnprocessableEntity, "load_from_disk cannot change here: use PATCH"), nil
+		}
+		if g.beforePut != nil {
+			g.beforePut(sc)
+		}
+		sc.Configuration = storedDocument(in.Configuration)
+		// A listener the new document no longer has takes its channels with
+		// it (models.PruneSidecarSlackChannels in writeSidecarConfiguration).
+		for name := range g.channels[sc.ID] {
+			if _, ok := listenerNames(sc.Configuration)[name]; !ok {
+				delete(g.channels[sc.ID], name)
+			}
+		}
+		return httpTestOk(http.StatusOK, view(sc)), nil
+	case http.MethodPatch:
+		var in struct {
+			Configuration map[string]json.RawMessage `json:"configuration"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		var doc map[string]json.RawMessage
+		_ = json.Unmarshal(sc.Configuration, &doc)
+		if doc == nil {
+			doc = map[string]json.RawMessage{}
+		}
+		for k, v := range in.Configuration {
+			if k == "load_from_disk" && string(v) != "true" {
+				if len(in.Configuration) != 1 {
+					return httpTestErr(http.StatusUnprocessableEntity, "send load_from_disk false alone"), nil
+				}
+				doc = map[string]json.RawMessage{}
+				continue
+			}
+			doc[k] = v
+		}
+		before := docFlag(sc.Configuration)
+		sc.Configuration, _ = json.Marshal(doc)
+		out := view(sc)
+		// An owner switch detaches every bound rule, in either direction, and
+		// the answer says which (apisidecar.Patch, services.DetachSidecarRulesTx).
+		if before != docFlag(sc.Configuration) && len(sc.BoundRules) > 0 {
+			detached := &hoop.SidecarDetachedRules{}
+			for _, b := range sc.BoundRules {
+				switch b.Kind {
+				case "guardrail":
+					detached.Unbound.Guardrails = append(detached.Unbound.Guardrails, b.Name)
+				case "datamasking":
+					detached.Unbound.DataMasking = append(detached.Unbound.DataMasking, b.Name)
+				default:
+					detached.Unbound.Analyzers = append(detached.Unbound.Analyzers, b.Name)
+				}
+			}
+			sc.BoundRules = nil
+			out = view(sc)
+			out.DetachedRules = detached
+		}
+		return httpTestOk(http.StatusOK, out), nil
+	case http.MethodDelete:
+		delete(g.byID, sc.ID)
+		delete(g.channels, sc.ID)
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+	}
+	return httpTestErr(http.StatusInternalServerError, "test: not implemented: %s %s", req.Method, req.URL.Path), nil
+}
+
+// fakeRuleGateway serves one rule collection keyed by id or by name. It
+// stores the body it receives, applying the gateway's reading of
+// sidecar_targets and sidecar_spec: absent keeps, present replaces.
+type fakeRuleGateway struct {
+	rec        *requestRecorder
+	collection string
+	keyByName  bool
+	mu         sync.Mutex
+	rules      map[string]map[string]json.RawMessage
+	nextID     int
+	license    fakeLicense
+}
+
+func newFakeRuleGateway(collection string, keyByName bool) *fakeRuleGateway {
+	return &fakeRuleGateway{
+		rec:        &requestRecorder{},
+		collection: collection,
+		keyByName:  keyByName,
+		rules:      map[string]map[string]json.RawMessage{},
+	}
+}
+
+func (g *fakeRuleGateway) key(rule map[string]json.RawMessage) string {
+	if g.keyByName {
+		var name string
+		_ = json.Unmarshal(rule["name"], &name)
+		return name
+	}
+	var id string
+	_ = json.Unmarshal(rule["id"], &id)
+	return id
+}
+
+// refuseNamelessTarget is the gateway's ValidateSidecarRuleTargets: a target
+// with no listener name is a 422, because a listener's protocol decides which
+// rules it can carry.
+func refuseNamelessTarget(rule map[string]json.RawMessage) *http.Response {
+	raw, ok := rule["sidecar_targets"]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	var targets []hoop.SidecarRuleTarget
+	if err := json.Unmarshal(raw, &targets); err != nil {
+		return httpTestErr(http.StatusUnprocessableEntity, "malformed sidecar_targets: %v", err)
+	}
+	for _, t := range targets {
+		if t.ListenerName == "" {
+			return httpTestErr(http.StatusUnprocessableEntity,
+				"a rule bound to sidecar %q names no listener; bind it to the listeners that must enforce it", t.SidecarID)
+		}
+	}
+	return nil
+}
+
+// sortTargets does what the gateway does when it answers a rule: its bindings
+// come back ORDER BY sidecar_id, listener_name, not in the order they were
+// sent (models.ListSidecarRuleBindings).
+func sortTargets(rule map[string]json.RawMessage) {
+	raw, ok := rule["sidecar_targets"]
+	if !ok || string(raw) == "null" {
+		return
+	}
+	var targets []hoop.SidecarRuleTarget
+	if err := json.Unmarshal(raw, &targets); err != nil {
+		return
+	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		if targets[i].SidecarID != targets[j].SidecarID {
+			return targets[i].SidecarID < targets[j].SidecarID
+		}
+		return targets[i].ListenerName < targets[j].ListenerName
+	})
+	rule["sidecar_targets"], _ = json.Marshal(targets)
+}
+
+// dropZeroLimits does what the gateway does with a review limit of 0: it
+// stores no limit and answers no key (services.StoredSidecarReviewTTL).
+func dropZeroLimits(rule map[string]json.RawMessage) {
+	for _, key := range []string{"pending_ttl_sec", "approval_ttl_sec"} {
+		if v, ok := rule[key]; ok && string(v) == "0" {
+			delete(rule, key)
+		}
+	}
+}
+
+// nullEmptyConnections does what the gateway does with a rule that names no
+// connections: it answers null, not []. A resource that reads that null into
+// a required list attribute plans a change on every run.
+func nullEmptyConnections(rule map[string]json.RawMessage) {
+	for _, key := range []string{"connection_ids", "connection_names"} {
+		if v, ok := rule[key]; ok && string(v) == "[]" {
+			rule[key] = json.RawMessage("null")
+		}
+	}
+}
+
+// sortedAttributes does what the gateway does when a rule is read: attribute
+// names come back ORDER BY name, while a write answers them in the order they
+// were sent. A rule that kept them as a list would plan the reorder forever.
+func sortedAttributes(rule map[string]json.RawMessage) map[string]json.RawMessage {
+	raw, ok := rule["attributes"]
+	if !ok {
+		return rule
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return rule
+	}
+	sort.Strings(names)
+	out := maps.Clone(rule)
+	out["attributes"], _ = json.Marshal(names)
+	return out
+}
+
+func (g *fakeRuleGateway) handle(req *http.Request) (*http.Response, error) {
+	body := g.rec.record(req)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if resp := g.license.serve(req); resp != nil {
+		return resp, nil
+	}
+	if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, g.collection) {
+		var in map[string]json.RawMessage
+		if err := json.Unmarshal(body, &in); err != nil {
+			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		if resp := refuseNamelessTarget(in); resp != nil {
+			return resp, nil
+		}
+		g.nextID++
+		id, _ := json.Marshal(fmt.Sprintf("rule-%d", g.nextID))
+		in["id"] = id
+		if _, ok := in["sidecar_targets"]; !ok {
+			in["sidecar_targets"] = json.RawMessage("[]")
+		}
+		nullEmptyConnections(in)
+		dropZeroLimits(in)
+		sortTargets(in)
+		g.rules[g.key(in)] = in
+		return httpTestOk(http.StatusCreated, in), nil
+	}
+
+	key := lastPathSegment(req.URL.Path)
+	stored, ok := g.rules[key]
+	if !ok {
+		return httpTestErr(http.StatusNotFound, "%s %q not found", g.collection, key), nil
+	}
+	switch req.Method {
+	case http.MethodGet:
+		return httpTestOk(http.StatusOK, sortedAttributes(stored)), nil
+	case http.MethodPut:
+		var in map[string]json.RawMessage
+		if err := json.Unmarshal(body, &in); err != nil {
+			return httpTestErr(http.StatusBadRequest, "bad body: %v", err), nil
+		}
+		if resp := refuseNamelessTarget(in); resp != nil {
+			return resp, nil
+		}
+		in["id"] = stored["id"]
+		// The gateway's three-way reading: a key that is absent keeps the
+		// stored value, a JSON null clears, anything else replaces.
+		for _, kept := range []string{"sidecar_targets", "sidecar_spec", "reviewers_groups", "pending_ttl_sec", "approval_ttl_sec"} {
+			if _, present := in[kept]; !present {
+				if v, had := stored[kept]; had {
+					in[kept] = v
+				}
+			} else if string(in[kept]) == "null" {
+				delete(in, kept)
+			}
+		}
+		nullEmptyConnections(in)
+		dropZeroLimits(in)
+		sortTargets(in)
+		delete(g.rules, key)
+		g.rules[g.key(in)] = in
+		return httpTestOk(http.StatusOK, in), nil
+	case http.MethodDelete:
+		delete(g.rules, key)
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+	}
+	return httpTestErr(http.StatusInternalServerError, "test: not implemented: %s %s", req.Method, req.URL.Path), nil
+}
+
+const testProviderBlock = `
+provider "hoop" {
+  api_key = "xapi-hash"
+  api_url = "http://localhost:8009/api"
+}
+`

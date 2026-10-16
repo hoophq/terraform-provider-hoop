@@ -79,7 +79,7 @@ resource "hoop_connection" "bash" {
 ### Optional
 
 - `command` (List of String) The command entrypoint that will be executed for one off executions. Each command argument should be a separate entry in the list.
-- `guardrail_rules` (List of String) A list of guardrail rule ids to be applied to the connection.
+- `guardrail_rules` (List of String) A list of guardrail rule ids to be applied to the connection. Leave the attribute out to keep guardrails linked outside this resource, such as through `hoop_guardrail`'s `connection_ids`; removing a declared value unlinks them. Manage each link from one side only.
 - `jira_issue_template_id` (String) The ID of the Jira issue template to be used for the connection.
 - `redact_types` (List of String, Deprecated) A list of redact types, these values are dependent of which DLP provider is being used.
 - `reviewers` (List of String) A list of approver groups that are allowed to approve a session.

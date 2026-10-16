@@ -146,7 +146,10 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 
 			"guardrail_rules": schema.ListAttribute{
-				Description: "A list of guardrail rule ids to be applied to the connection.",
+				Description: "A list of guardrail rule ids to be applied to the connection. " +
+					"Leave the attribute out to keep guardrails linked outside this resource, such as through " +
+					"`hoop_guardrail`'s `connection_ids`; removing a declared value unlinks them. " +
+					"Manage each link from one side only.",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators:  NonEmptyListValidator,
@@ -253,6 +256,30 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
+	// The update replaces the whole connection, links included, so what this
+	// resource does not manage goes back as the gateway stores it. Attribute
+	// links always do: the resource has no attribute for them, and an absent
+	// key would unlink every attribute set in the UI. An undeclared
+	// guardrail_rules does too, or it would unlink the guardrails bound
+	// through hoop_guardrail; removing a declared value still clears it.
+	var prior connectionResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &prior)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	stored, err := r.client.GetConnection(plan.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error Reading Connection",
+			fmt.Sprintf("Failed to read the connection's guardrail and attribute links before updating it: %v", err),
+		)
+		return
+	}
+	reqConn.Attributes = stored.Attributes
+	if plan.GuardRailRules.IsNull() && prior.GuardRailRules.IsNull() {
+		reqConn.GuardRailRules = stored.GuardRailRules
+	}
+
 	newConn, err := r.client.UpdateConnection(reqConn)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -352,14 +379,19 @@ func toConnectionResourceModel(ctx context.Context, state connectionResourceMode
 		state.Reviewers = types.ListNull(types.StringType)
 	}
 
-	state.GuardRailRules, diags = types.ListValueFrom(ctx, types.StringType, obj.GuardRailRules)
-	if diags.HasError() {
-		return nil, diags
-	}
+	// guardrail_rules is Terraform's only once declared. hoop_guardrail's
+	// connection_ids writes the same link from the rule's side, and reading
+	// those ids into an undeclared attribute would plan their removal.
+	if !state.GuardRailRules.IsNull() {
+		state.GuardRailRules, diags = types.ListValueFrom(ctx, types.StringType, obj.GuardRailRules)
+		if diags.HasError() {
+			return nil, diags
+		}
 
-	// coerce the optional field to a ListNull if it is empty
-	if len(state.GuardRailRules.Elements()) == 0 {
-		state.GuardRailRules = types.ListNull(types.StringType)
+		// coerce the optional field to a ListNull if it is empty
+		if len(state.GuardRailRules.Elements()) == 0 {
+			state.GuardRailRules = types.ListNull(types.StringType)
+		}
 	}
 
 	state.RedactTypes, diags = types.ListValueFrom(ctx, types.StringType, obj.RedactTypes)

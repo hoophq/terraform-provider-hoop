@@ -4,6 +4,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -11,10 +12,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
 
 func createFakeConnectionTestServer() clientFunc {
+	client, _ := createFakeConnectionTestServerWithStore()
+	return client
+}
+
+// createFakeConnectionTestServerWithStore also returns the store, so a test
+// can change a connection the way another resource would.
+func createFakeConnectionTestServerWithStore() (clientFunc, map[string]*hoop.Connection) {
 	store := map[string]*hoop.Connection{}
 	return clientFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.Method {
@@ -55,7 +64,7 @@ func createFakeConnectionTestServer() clientFunc {
 			return httpTestOk(http.StatusOK, reqConn), nil
 		}
 		return httpTestErr(http.StatusInternalServerError, `test: url path not implemented path: %s, method: %s`, req.URL.Path, req.Method), nil
-	})
+	}), store
 }
 
 func TestAccConnectionResource(t *testing.T) {
@@ -229,6 +238,67 @@ resource "hoop_connection" "bash" {
   access_schema = "enabled"
 }
 `,
+			},
+		},
+	})
+}
+
+// TestConnectionResourceKeepsGuardrailsLinkedElsewhere: hoop_guardrail links
+// itself to a connection through connection_ids. A connection that does not
+// declare guardrail_rules plans no change for that link, and an update, which
+// replaces the whole connection, sends it back instead of dropping it.
+func TestConnectionResourceKeepsGuardrailsLinkedElsewhere(t *testing.T) {
+	client, store := createFakeConnectionTestServerWithStore()
+	config := func(command string) string {
+		return `
+provider "hoop" {
+  api_key = "orgid|hash"
+  api_url = "http://localhost:8009/api"
+}
+
+resource "hoop_connection" "bash" {
+  name     = "bash"
+  type     = "custom"
+  agent_id = "75122bce-f957-49eb-a812-2ab60977cd9f"
+  command  = ["` + command + `"]
+
+  access_mode_runbooks = "enabled"
+  access_mode_exec     = "enabled"
+  access_mode_connect  = "enabled"
+  access_schema        = "enabled"
+}
+`
+	}
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", client)()),
+		},
+		Steps: []resource.TestStep{
+			{Config: config("bash")},
+			{
+				// Links made elsewhere: a guardrail through hoop_guardrail, an
+				// attribute on the attribute itself. Neither is drift.
+				PreConfig: func() {
+					store["bash"].GuardRailRules = []string{"guardrail-1"}
+					store["bash"].Attributes = []string{"pci"}
+				},
+				Config:   config("bash"),
+				PlanOnly: true,
+			},
+			{
+				Config: config("sh"),
+				Check: func(*terraform.State) error {
+					if got := store["bash"].GuardRailRules; len(got) != 1 || got[0] != "guardrail-1" {
+						return fmt.Errorf("guardrail_rules after the update: got %v, want [guardrail-1]", got)
+					}
+					// The resource has no attributes attribute, and the
+					// gateway reads an absent key as none.
+					if got := store["bash"].Attributes; len(got) != 1 || got[0] != "pci" {
+						return fmt.Errorf("attributes after the update: got %v, want [pci]", got)
+					}
+					return nil
+				},
 			},
 		},
 	})
