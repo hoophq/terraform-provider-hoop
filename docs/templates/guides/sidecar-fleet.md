@@ -76,6 +76,14 @@ data "hoop_sidecar" "ws_123" {
 
 A `data` block fails while the sidecar does not exist yet, so the first `terraform apply` after the deploy may need a retry while the pod comes up. Once the sidecar is there, `data.hoop_sidecar.ws_123.id` is stable across pod restarts, rollouts and replicas: they all land on the same sidecar.
 
+Each pod still shows up on its own. A pod reports its hostname on every request to the control plane, and the data source lists the pods under `instances`, each with its `status` (`online` or `offline`), `last_seen_at`, `version` and the revision it applied. The configuration stays one document, shared by every pod; `instances` only tells which pods are running it. It is null until a pod reports, so guard a `for` over it:
+
+```terraform
+output "ws_123_pods" {
+  value = data.hoop_sidecar.ws_123.instances == null ? [] : [for i in data.hoop_sidecar.ws_123.instances : "${i.name} ${i.status}"]
+}
+```
+
 ## Token, anywhere
 
 ```terraform

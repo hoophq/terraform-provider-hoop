@@ -108,9 +108,10 @@ func (r *sidecarServiceAccountResource) Schema(_ context.Context, _ resource.Sch
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "A label for this mapping, unique in the organization.",
-				Required:    true,
-				Validators:  NonEmptyStringValidator,
+				Description: "A label for this mapping, unique in the organization. 3 to 254 characters: letters, " +
+					"digits and `_`, with a single `-` or `.` allowed between them but not at either end.",
+				Required:   true,
+				Validators: ResourceNameValidator,
 			},
 			"issuer": schema.StringAttribute{
 				Description: "The exact `iss` of the tokens. Without `jwks`, an https URL with no query or fragment, " +

@@ -49,7 +49,7 @@ resource "hoop_sidecar_service_account" "gce" {
 - `audience` (String) The `aud` the tokens must carry: the control plane URL the sidecar uses. One organization owns each issuer and audience pair.
 - `claim` (String) The claim matched against `subject_pattern`. `sub` for a Kubernetes service account; `email` for a Google service account, whose token must carry `email_verified`.
 - `issuer` (String) The exact `iss` of the tokens. Without `jwks`, an https URL with no query or fragment, where the control plane fetches the signing keys through OIDC discovery. With `jwks`, the keys come from that document and the issuer is matched as written.
-- `name` (String) A label for this mapping, unique in the organization.
+- `name` (String) A label for this mapping, unique in the organization. 3 to 254 characters: letters, digits and `_`, with a single `-` or `.` allowed between them but not at either end.
 - `name_template` (String) The name of the sidecar a matching token reaches. `{1}` is the text the `*` matched.
 - `subject_pattern` (String) An exact value, or one with a single `*` that matches one or more characters, such as `system:serviceaccount:*:hoop-sidecar`. A bare `*` needs `allow_any_subject`.
 

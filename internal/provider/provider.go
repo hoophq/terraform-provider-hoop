@@ -4,7 +4,9 @@ package provider
 
 import (
 	"context"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -62,8 +64,10 @@ func (p *hoopProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 		Description: providerDescription,
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
-				Description: "The API URL of the Hoop Gateway instance. It may also be provided via `HOOP_APIURL` environment variable.",
-				Optional:    true,
+				Description: "The URL of the Hoop Gateway REST API. The gateway serves it under the `/api` path, " +
+					"so include that suffix: `https://gateway.example.com/api`. " +
+					"It may also be provided via the `HOOP_APIURL` environment variable.",
+				Optional: true,
 			},
 			"api_key": schema.StringAttribute{
 				Description: "The API Key to authenticate in the Hoop Gateway. May also be provided via `HOOP_APIKEY` environment variable.",
@@ -192,6 +196,19 @@ func (p *hoopProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		"auth_scheme": string(client.AuthScheme()),
 	})
 
+	// A URL without the /api path is the usual cause of a 404 on every
+	// request. A warning, not an error: a gateway fronted under a prefix
+	// still ends with /api, and an operator may route it differently.
+	if missingAPIPath(apiURL) {
+		redacted := client.RedactedAPIURL()
+		resp.Diagnostics.AddAttributeWarning(
+			path.Root("api_url"),
+			"API URL Without /api Path",
+			"Requests go to "+redacted+"/..., and the Hoop Gateway serves its REST API under /api. "+
+				"If every request fails with 404, set api_url to "+redacted+"/api.",
+		)
+	}
+
 	// Make the HashiCups client available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = client
@@ -223,4 +240,14 @@ func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewAccessRequestRuleResource,
 		NewFeatureFlagResource,
 	}
+}
+
+// missingAPIPath reports whether apiURL parses and its path does not end in
+// /api, a trailing slash ignored.
+func missingAPIPath(apiURL string) bool {
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return false
+	}
+	return !strings.HasSuffix(strings.TrimSuffix(u.Path, "/"), "/api")
 }
