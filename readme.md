@@ -16,6 +16,7 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 - [x] Sidecars, Sidecar Service Accounts
 - [x] Access Request Rules
 - [x] Feature Flags
+- [x] Server Authentication Configuration
 
 ## Documentation
 
