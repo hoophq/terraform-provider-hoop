@@ -19,10 +19,3 @@ resource "hoop_guardrail" "no_destructive" {
 output "gke_eu_ws_123_config_state" {
   value = data.hoop_sidecar.gke_eu_ws_123.config_state
 }
-
-# The pods behind the sidecar, each with its status. Null until one reports.
-output "gke_eu_ws_123_pods" {
-  value = data.hoop_sidecar.gke_eu_ws_123.instances == null ? [] : [
-    for i in data.hoop_sidecar.gke_eu_ws_123.instances : "${i.name} ${i.status}"
-  ]
-}

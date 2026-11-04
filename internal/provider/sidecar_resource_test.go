@@ -9,10 +9,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
-	"github.com/hashicorp/terraform-plugin-testing/statecheck"
-	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
-	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
 
 const sidecarConfigV1 = `jsonencode({
@@ -156,7 +152,14 @@ resource "hoop_sidecar" "payments" {
 
 func TestSidecarDataSource(t *testing.T) {
 	gw := newFakeSidecarGateway(t)
-	config := testProviderBlock + `
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testProviderBlock + `
 resource "hoop_sidecar" "payments" {
   name          = "payments"
   configuration = ` + sidecarConfigV1 + `
@@ -164,50 +167,12 @@ resource "hoop_sidecar" "payments" {
 
 data "hoop_sidecar" "payments" {
   name = hoop_sidecar.payments.name
-}`
-	resource.ParallelTest(t, resource.TestCase{
-		IsUnitTest: true,
-		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
-		},
-		Steps: []resource.TestStep{
-			// No pod has reported: the gateway omits instances and the
-			// attribute is null, as it is on a gateway from before the field.
-			{
-				Config: config,
+}`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "id", "sc-1"),
 					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "config_state", "applied"),
 					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "load_from_disk", "false"),
 					resource.TestCheckResourceAttrPair("data.hoop_sidecar.payments", "configuration", "hoop_sidecar.payments", "configuration"),
-					resource.TestCheckNoResourceAttr("data.hoop_sidecar.payments", "instances.#"),
-				),
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("data.hoop_sidecar.payments", tfjsonpath.New("instances"), knownvalue.Null()),
-				},
-			},
-			// Two pods reported, one of them gone quiet.
-			{
-				PreConfig: func() {
-					gw.report(
-						hoop.SidecarInstance{Name: "hoop-sidecar-7d9f-abc12", Status: "online", Version: "1.2.3",
-							LastSeenAt: "2026-11-03T10:00:00Z", AppliedRevision: "8f14", LastOutcome: "applied"},
-						hoop.SidecarInstance{Name: "hoop-sidecar-7d9f-xyz89", Status: "offline", Version: "1.2.2",
-							LastSeenAt: "2026-11-02T10:00:00Z", AppliedRevision: "8f14", LastOutcome: "refused", LastError: "listen tcp: address in use"},
-					)
-				},
-				Config: config,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.#", "2"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.name", "hoop-sidecar-7d9f-abc12"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.status", "online"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.version", "1.2.3"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.last_seen_at", "2026-11-03T10:00:00Z"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.applied_revision", "8f14"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.last_outcome", "applied"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.0.last_error", ""),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.1.status", "offline"),
-					resource.TestCheckResourceAttr("data.hoop_sidecar.payments", "instances.1.last_error", "listen tcp: address in use"),
 				),
 			},
 		},

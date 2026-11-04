@@ -175,14 +175,6 @@ func (g *fakeSidecarGateway) bind(b hoop.SidecarRuleBinding) {
 	sc.BoundRules = append(sc.BoundRules, b)
 }
 
-// report records the instances the pods of sc-1 would have reported, so the
-// next read of the sidecar lists them.
-func (g *fakeSidecarGateway) report(instances ...hoop.SidecarInstance) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.byID["sc-1"].Instances = instances
-}
-
 func newFakeSidecarGateway(t *testing.T) *fakeSidecarGateway {
 	return &fakeSidecarGateway{
 		t:        t,

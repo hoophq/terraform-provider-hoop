@@ -40,23 +40,6 @@ type Sidecar struct {
 	LastError       string `json:"last_error,omitempty"`
 	IdentityIssuer  string `json:"identity_issuer,omitempty"`
 	IdentitySubject string `json:"identity_subject,omitempty"`
-
-	// Instances is one entry per pod that reported its hostname, on the GET
-	// of one sidecar only. Absent from a gateway from before instances and
-	// while no pod has reported.
-	Instances []SidecarInstance `json:"instances,omitempty"`
-}
-
-// SidecarInstance is one pod behind a sidecar, named by the hostname it sends
-// on every control plane request.
-type SidecarInstance struct {
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	Version         string `json:"version,omitempty"`
-	LastSeenAt      string `json:"last_seen_at,omitempty"`
-	AppliedRevision string `json:"applied_revision,omitempty"`
-	LastOutcome     string `json:"last_outcome,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
 }
 
 // SidecarRuleBinding is one rule a sidecar enforces: its kind (guardrail,
