@@ -17,7 +17,7 @@ It's a Terraform provider that allows you to create, read, update, and delete re
 - [x] Access Request Rules
 - [x] Feature Flags
 - [x] Server Authentication Configuration
-- [x] Server HTTP Proxy Configuration
+- [x] Server Proxy Servers Configuration
 
 ## Documentation
 

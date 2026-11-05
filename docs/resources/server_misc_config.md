@@ -3,24 +3,36 @@
 page_title: "hoop_server_misc_config Resource - hoop"
 subcategory: ""
 description: |-
-  Manages the HTTP proxy listener of /api/serverconfig/misc, the HTTP proxy block behind Settings → Server → Proxies of a self-hosted gateway. The RDP, PostgreSQL and SSH listeners stay with the web app: every write reads the row and passes them back unchanged. The block is written exactly as written on every apply, so one without listen_address stops the proxy, and a change made in the web app shows as drift that the next apply puts back. Destroying the resource stops the HTTP proxy and leaves the other listeners untouched. An import reads the block into state when the gateway holds it. A multi-tenant gateway refuses the route.
+  Manages the proxy listeners of /api/serverconfig/misc, the blocks behind Settings → Server → Proxies of a self-hosted gateway. Each block follows one rule: left out, it stays with the web app and is passed back unchanged on every write; declared, even as {}, it is written exactly as written on every apply, so a change made in the web app shows as drift that the next apply puts back; removed, that proxy stops. Destroying the resource stops every declared proxy and leaves the others untouched. An import reads every block the gateway holds into state: the gateway cannot say which ones Terraform owns, so declare the blocks to keep; the next apply stops the proxy of an imported block the configuration leaves out. A multi-tenant gateway refuses the route.
 ---
 
 # hoop_server_misc_config (Resource)
 
-Manages the HTTP proxy listener of `/api/serverconfig/misc`, the HTTP proxy block behind Settings → Server → Proxies of a self-hosted gateway. The RDP, PostgreSQL and SSH listeners stay with the web app: every write reads the row and passes them back unchanged. The block is written exactly as written on every apply, so one without `listen_address` stops the proxy, and a change made in the web app shows as drift that the next apply puts back. Destroying the resource stops the HTTP proxy and leaves the other listeners untouched. An import reads the block into state when the gateway holds it. A multi-tenant gateway refuses the route.
+Manages the proxy listeners of `/api/serverconfig/misc`, the blocks behind Settings → Server → Proxies of a self-hosted gateway. Each block follows one rule: left out, it stays with the web app and is passed back unchanged on every write; declared, even as `{}`, it is written exactly as written on every apply, so a change made in the web app shows as drift that the next apply puts back; removed, that proxy stops. Destroying the resource stops every declared proxy and leaves the others untouched. An import reads every block the gateway holds into state: the gateway cannot say which ones Terraform owns, so declare the blocks to keep; the next apply stops the proxy of an imported block the configuration leaves out. A multi-tenant gateway refuses the route.
 
 ## Example Usage
 
 ```terraform
 # Copyright (c) HashiCorp, Inc.
 
-# The block is written as written on every apply, so a change made in the web
-# app shows as drift and the next apply puts it back. The RDP, PostgreSQL and
-# SSH listeners stay with the web app and are passed back unchanged.
+# A declared block is written as written on every apply, so a change made in
+# the web app shows as drift and the next apply puts it back. Removing a
+# declared block stops that proxy. postgres_server_config is left out, so it
+# stays with the web app and is passed back unchanged.
 resource "hoop_server_misc_config" "this" {
-  http_proxy_server_config = {
-    listen_address = "0.0.0.0:18888"
+  rdp_server_config = {
+    listen_address = "0.0.0.0:13389"
+  }
+
+  # hosts_key is left out: the gateway generates one when the proxy starts
+  # and keeps it across applies.
+  ssh_server_config = {
+    listen_address = "0.0.0.0:12222"
+    trusted_cas    = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLE ca@example.com"]
+    user_mapping = {
+      cert_attr = "principal"
+      user_attr = "email"
+    }
   }
 }
 ```
@@ -30,7 +42,10 @@ resource "hoop_server_misc_config" "this" {
 
 ### Optional
 
-- `http_proxy_server_config` (Attributes) The HTTP proxy. Leaving the block out leaves it to the web app: the value the gateway holds is passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it exactly as written on every apply, so a change made in the web app shows as drift on the next plan and the apply puts it back. Removing a declared block stops the proxy. (see [below for nested schema](#nestedatt--http_proxy_server_config))
+- `http_proxy_server_config` (Attributes) The HTTP proxy. Leaving the block out leaves it to the web app: the value the gateway holds is passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it exactly as written on every apply, so a change made in the web app shows as drift on the next plan and the apply puts it back. Removing a declared block stops that proxy. (see [below for nested schema](#nestedatt--http_proxy_server_config))
+- `postgres_server_config` (Attributes) The PostgreSQL proxy. Leaving the block out leaves it to the web app: the value the gateway holds is passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it exactly as written on every apply, so a change made in the web app shows as drift on the next plan and the apply puts it back. Removing a declared block stops that proxy. (see [below for nested schema](#nestedatt--postgres_server_config))
+- `rdp_server_config` (Attributes) The RDP proxy. Leaving the block out leaves it to the web app: the value the gateway holds is passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it exactly as written on every apply, so a change made in the web app shows as drift on the next plan and the apply puts it back. Removing a declared block stops that proxy. (see [below for nested schema](#nestedatt--rdp_server_config))
+- `ssh_server_config` (Attributes) The SSH proxy. Leaving the block out leaves it to the web app: the value the gateway holds is passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it exactly as written on every apply, so a change made in the web app shows as drift on the next plan and the apply puts it back. Removing a declared block stops that proxy. (see [below for nested schema](#nestedatt--ssh_server_config))
 
 ### Read-Only
 
@@ -43,6 +58,41 @@ Optional:
 
 - `listen_address` (String) The `host:port` the proxy listens on, such as `0.0.0.0:18888`. Leaving it out stops the proxy.
 
+
+<a id="nestedatt--postgres_server_config"></a>
+### Nested Schema for `postgres_server_config`
+
+Optional:
+
+- `listen_address` (String) The `host:port` the proxy listens on, such as `0.0.0.0:15432`. Leaving it out stops the proxy.
+
+
+<a id="nestedatt--rdp_server_config"></a>
+### Nested Schema for `rdp_server_config`
+
+Optional:
+
+- `listen_address` (String) The `host:port` the proxy listens on, such as `0.0.0.0:13389`. Leaving it out stops the proxy.
+
+
+<a id="nestedatt--ssh_server_config"></a>
+### Nested Schema for `ssh_server_config`
+
+Optional:
+
+- `hosts_key` (String, Sensitive) The host key, base64 PEM. Generated by the gateway when the SSH proxy starts without one, and kept across applies.
+- `listen_address` (String) The `host:port` the proxy listens on, such as `0.0.0.0:12222`. Leaving it out stops the proxy.
+- `trusted_cas` (List of String) SSH CA public keys in `authorized_keys` format. When set, the proxy accepts certificate authentication and `user_mapping` is required.
+- `user_mapping` (Attributes) How a certificate maps to a user. Required with `trusted_cas`. (see [below for nested schema](#nestedatt--ssh_server_config--user_mapping))
+
+<a id="nestedatt--ssh_server_config--user_mapping"></a>
+### Nested Schema for `ssh_server_config.user_mapping`
+
+Required:
+
+- `cert_attr` (String) The certificate field looked up: `principal` (the first matching principal wins) or `key_id`.
+- `user_attr` (String) The user field matched against it: `email`, `subject` or `user_id`.
+
 ## Import
 
 Import is supported using the following syntax:
@@ -50,6 +100,8 @@ Import is supported using the following syntax:
 ```shell
 # Copyright (c) HashiCorp, Inc.
 
-# The import reads http_proxy_server_config in when the gateway holds it.
+# The import reads every block the gateway holds into state: the gateway
+# cannot say which ones Terraform owns. Declare the blocks to keep; the next
+# apply stops the proxy of any imported block the configuration leaves out.
 terraform import hoop_server_misc_config.this server
 ```

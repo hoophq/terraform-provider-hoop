@@ -10,22 +10,34 @@ import (
 
 // ServerMiscConfig is the gateway's one proxy servers row. PUT replaces the
 // whole row: a block left out is stored empty. A nil block is "none", a block
-// with an empty listen_address stops that proxy.
-//
-// The provider manages the HTTP proxy block only. The other three are raw
-// JSON so a read-modify-write passes them back byte for byte: the SSH block
-// carries a host key and a user mapping, and a typed struct would drop any
-// field a newer gateway adds.
+// with an empty listen_address stops that proxy. The gRPC URL is not managed
+// by the provider and is passed back as read.
 type ServerMiscConfig struct {
 	GrpcServerURL         string             `json:"grpc_server_url"`
-	PostgresServerConfig  json.RawMessage    `json:"postgres_server_config"`
-	SSHServerConfig       json.RawMessage    `json:"ssh_server_config"`
-	RDPServerConfig       json.RawMessage    `json:"rdp_server_config"`
+	PostgresServerConfig  *ServerProxyConfig `json:"postgres_server_config"`
+	SSHServerConfig       *ServerSSHConfig   `json:"ssh_server_config"`
+	RDPServerConfig       *ServerProxyConfig `json:"rdp_server_config"`
 	HttpProxyServerConfig *ServerProxyConfig `json:"http_proxy_server_config"`
 }
 
 type ServerProxyConfig struct {
 	ListenAddress string `json:"listen_address"`
+}
+
+// ServerSSHConfig is the SSH proxy block. An empty HostsKey makes the gateway
+// generate one when the proxy starts, and answer it.
+type ServerSSHConfig struct {
+	ListenAddress string            `json:"listen_address"`
+	HostsKey      string            `json:"hosts_key,omitempty"`
+	TrustedCAs    []string          `json:"trusted_cas,omitempty"`
+	UserMapping   *ServerSSHUserMap `json:"user_mapping,omitempty"`
+}
+
+// ServerSSHUserMap names the certificate field and the user field the SSH
+// proxy matches to sign a certificate holder in.
+type ServerSSHUserMap struct {
+	CertAttribute string `json:"cert_attr"`
+	UserAttribute string `json:"user_attr"`
 }
 
 // GetServerMiscConfig reads the row. With no row stored the gateway answers

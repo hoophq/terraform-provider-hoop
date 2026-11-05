@@ -6,10 +6,12 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -20,8 +22,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &serverMiscConfigResource{}
-	_ resource.ResourceWithImportState = &serverMiscConfigResource{}
+	_ resource.Resource                   = &serverMiscConfigResource{}
+	_ resource.ResourceWithImportState    = &serverMiscConfigResource{}
+	_ resource.ResourceWithValidateConfig = &serverMiscConfigResource{}
 )
 
 // serverMiscConfigID is the id of the one row a gateway has.
@@ -33,11 +36,26 @@ func NewServerMiscConfigResource() resource.Resource {
 
 type serverMiscConfigResourceModel struct {
 	ID                    types.String `tfsdk:"id"`
+	RdpServerConfig       types.Object `tfsdk:"rdp_server_config"`
+	PostgresServerConfig  types.Object `tfsdk:"postgres_server_config"`
 	HttpProxyServerConfig types.Object `tfsdk:"http_proxy_server_config"`
+	SshServerConfig       types.Object `tfsdk:"ssh_server_config"`
 }
 
 type serverProxyConfigModel struct {
 	ListenAddress types.String `tfsdk:"listen_address"`
+}
+
+type serverSshConfigModel struct {
+	ListenAddress types.String `tfsdk:"listen_address"`
+	HostsKey      types.String `tfsdk:"hosts_key"`
+	TrustedCAs    types.List   `tfsdk:"trusted_cas"`
+	UserMapping   types.Object `tfsdk:"user_mapping"`
+}
+
+type serverSshUserMappingModel struct {
+	CertAttr types.String `tfsdk:"cert_attr"`
+	UserAttr types.String `tfsdk:"user_attr"`
 }
 
 var serverProxyConfigObjectType = types.ObjectType{
@@ -46,10 +64,34 @@ var serverProxyConfigObjectType = types.ObjectType{
 	},
 }
 
+var serverSshUserMappingObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"cert_attr": types.StringType,
+		"user_attr": types.StringType,
+	},
+}
+
+var serverSshConfigObjectType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"listen_address": types.StringType,
+		"hosts_key":      types.StringType,
+		"trusted_cas":    types.ListType{ElemType: types.StringType},
+		"user_mapping":   serverSshUserMappingObjectType,
+	},
+}
+
 // listenAddressValidator is the gateway's check: host:port, or empty to stop
 // the proxy.
 var listenAddressValidator = []validator.String{
 	stringvalidator.RegexMatches(regexp.MustCompile(`^$|:`), "must be `host:port`, or empty to stop the proxy"),
+}
+
+var sshCertAttrValidator = []validator.String{
+	stringvalidator.OneOf("principal", "key_id"),
+}
+
+var sshUserAttrValidator = []validator.String{
+	stringvalidator.OneOf("email", "subject", "user_id"),
 }
 
 type serverMiscConfigResource struct {
@@ -60,15 +102,42 @@ func (r *serverMiscConfigResource) Metadata(_ context.Context, req resource.Meta
 	resp.TypeName = req.ProviderTypeName + "_server_misc_config"
 }
 
+// serverMiscBlockDescription is the rule every block follows.
+const serverMiscBlockDescription = "Leaving the block out leaves it to the web app: the value the gateway holds is " +
+	"passed back unchanged on every write and never read into state. Declaring it, even as `{}`, writes it " +
+	"exactly as written on every apply, so a change made in the web app shows as drift on the next plan and " +
+	"the apply puts it back. Removing a declared block stops that proxy."
+
+func serverListenAddressAttribute(example string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Description: "The `host:port` the proxy listens on, such as `" + example + "`. " +
+			"Leaving it out stops the proxy.",
+		Optional:   true,
+		Validators: listenAddressValidator,
+	}
+}
+
+func serverProxyConfigAttribute(proxy, example string) schema.SingleNestedAttribute {
+	return schema.SingleNestedAttribute{
+		Description: "The " + proxy + " proxy. " + serverMiscBlockDescription,
+		Optional:    true,
+		Attributes: map[string]schema.Attribute{
+			"listen_address": serverListenAddressAttribute(example),
+		},
+	}
+}
+
 func (r *serverMiscConfigResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the HTTP proxy listener of `/api/serverconfig/misc`, the HTTP proxy block behind " +
-			"Settings → Server → Proxies of a self-hosted gateway. The RDP, PostgreSQL and SSH listeners stay " +
-			"with the web app: every write reads the row and passes them back unchanged. The block is written " +
-			"exactly as written on every apply, so one without `listen_address` stops the proxy, and a change " +
-			"made in the web app shows as drift that the next apply puts back. Destroying the resource stops " +
-			"the HTTP proxy and leaves the other listeners untouched. An import reads the block into state " +
-			"when the gateway holds it. A multi-tenant gateway refuses the route.",
+		Description: "Manages the proxy listeners of `/api/serverconfig/misc`, the blocks behind " +
+			"Settings → Server → Proxies of a self-hosted gateway. Each block follows one rule: left out, it " +
+			"stays with the web app and is passed back unchanged on every write; declared, even as `{}`, it is " +
+			"written exactly as written on every apply, so a change made in the web app shows as drift that " +
+			"the next apply puts back; removed, that proxy stops. Destroying the resource stops every declared " +
+			"proxy and leaves the others untouched. An import reads every block the gateway holds into state: " +
+			"the gateway cannot say which ones Terraform owns, so declare the blocks to keep; the next apply " +
+			"stops the proxy of an imported block the configuration leaves out. " +
+			"A multi-tenant gateway refuses the route.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Always `server`: a gateway has one row.",
@@ -77,18 +146,46 @@ func (r *serverMiscConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"http_proxy_server_config": schema.SingleNestedAttribute{
-				Description: "The HTTP proxy. Leaving the block out leaves it to the web app: the value the gateway " +
-					"holds is passed back unchanged on every write and never read into state. Declaring it, even " +
-					"as `{}`, writes it exactly as written on every apply, so a change made in the web app shows " +
-					"as drift on the next plan and the apply puts it back. Removing a declared block stops the proxy.",
-				Optional: true,
+			"rdp_server_config":        serverProxyConfigAttribute("RDP", "0.0.0.0:13389"),
+			"postgres_server_config":   serverProxyConfigAttribute("PostgreSQL", "0.0.0.0:15432"),
+			"http_proxy_server_config": serverProxyConfigAttribute("HTTP", "0.0.0.0:18888"),
+			"ssh_server_config": schema.SingleNestedAttribute{
+				Description: "The SSH proxy. " + serverMiscBlockDescription,
+				Optional:    true,
 				Attributes: map[string]schema.Attribute{
-					"listen_address": schema.StringAttribute{
-						Description: "The `host:port` the proxy listens on, such as `0.0.0.0:18888`. " +
-							"Leaving it out stops the proxy.",
-						Optional:   true,
-						Validators: listenAddressValidator,
+					"listen_address": serverListenAddressAttribute("0.0.0.0:12222"),
+					"hosts_key": schema.StringAttribute{
+						Description: "The host key, base64 PEM. Generated by the gateway when the SSH proxy starts " +
+							"without one, and kept across applies.",
+						Optional:  true,
+						Computed:  true,
+						Sensitive: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
+					},
+					"trusted_cas": schema.ListAttribute{
+						Description: "SSH CA public keys in `authorized_keys` format. When set, the proxy accepts " +
+							"certificate authentication and `user_mapping` is required.",
+						ElementType: types.StringType,
+						Optional:    true,
+					},
+					"user_mapping": schema.SingleNestedAttribute{
+						Description: "How a certificate maps to a user. Required with `trusted_cas`.",
+						Optional:    true,
+						Attributes: map[string]schema.Attribute{
+							"cert_attr": schema.StringAttribute{
+								Description: "The certificate field looked up: `principal` (the first matching " +
+									"principal wins) or `key_id`.",
+								Required:   true,
+								Validators: sshCertAttrValidator,
+							},
+							"user_attr": schema.StringAttribute{
+								Description: "The user field matched against it: `email`, `subject` or `user_id`.",
+								Required:    true,
+								Validators:  sshUserAttrValidator,
+							},
+						},
 					},
 				},
 			},
@@ -96,7 +193,29 @@ func (r *serverMiscConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 	}
 }
 
-// toApiProxyConfig picks what goes out for the block: the plan's value when
+// ValidateConfig refuses at plan what the gateway refuses at write: trusted
+// CAs without the mapping that names the user.
+func (r *serverMiscConfigResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data serverMiscConfigResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() || data.SshServerConfig.IsNull() || data.SshServerConfig.IsUnknown() {
+		return
+	}
+
+	var ssh serverSshConfigModel
+	resp.Diagnostics.Append(data.SshServerConfig.As(ctx, &ssh, basetypesObjectAsOptions)...)
+	if resp.Diagnostics.HasError() || ssh.TrustedCAs.IsNull() || ssh.TrustedCAs.IsUnknown() {
+		return
+	}
+
+	if len(ssh.TrustedCAs.Elements()) > 0 && ssh.UserMapping.IsNull() {
+		resp.Diagnostics.AddAttributeError(path.Root("ssh_server_config").AtName("user_mapping"),
+			"SSH User Mapping Required",
+			"trusted_cas needs user_mapping: the gateway has to know which user a certificate signs in.")
+	}
+}
+
+// toApiProxyConfig picks what goes out for one block: the plan's value when
 // declared, the stop value when the prior declared it and the plan no longer
 // does, and the gateway's own value when neither did.
 func toApiProxyConfig(ctx context.Context, plan, prior types.Object, current *hoop.ServerProxyConfig) (*hoop.ServerProxyConfig, diag.Diagnostics) {
@@ -112,30 +231,85 @@ func toApiProxyConfig(ctx context.Context, plan, prior types.Object, current *ho
 	return &hoop.ServerProxyConfig{ListenAddress: m.ListenAddress.ValueString()}, diags
 }
 
-// toApi builds the whole row from the plan over current, the gateway's row:
-// the gRPC URL and the blocks the provider does not manage pass through
-// unchanged.
-func (m *serverMiscConfigResourceModel) toApi(ctx context.Context, prior *serverMiscConfigResourceModel, current *hoop.ServerMiscConfig) (*hoop.ServerMiscConfig, diag.Diagnostics) {
-	cfg := &hoop.ServerMiscConfig{
-		GrpcServerURL:        current.GrpcServerURL,
-		PostgresServerConfig: current.PostgresServerConfig,
-		SSHServerConfig:      current.SSHServerConfig,
-		RDPServerConfig:      current.RDPServerConfig,
+// toApiSshConfig follows toApiProxyConfig. An unknown hosts_key goes out
+// empty, so the gateway generates one; a known one is sent back as stored.
+func toApiSshConfig(ctx context.Context, plan, prior types.Object, current *hoop.ServerSSHConfig) (*hoop.ServerSSHConfig, diag.Diagnostics) {
+	if plan.IsNull() {
+		if prior.IsNull() {
+			return current, nil
+		}
+		return &hoop.ServerSSHConfig{}, nil
 	}
-	httpProxy, diags := toApiProxyConfig(ctx, m.HttpProxyServerConfig, prior.HttpProxyServerConfig, current.HttpProxyServerConfig)
+
+	var m serverSshConfigModel
+	diags := plan.As(ctx, &m, basetypesObjectAsOptions)
+	cas, d := toApiStringList(ctx, m.TrustedCAs)
+	diags.Append(d...)
+	cfg := &hoop.ServerSSHConfig{
+		ListenAddress: m.ListenAddress.ValueString(),
+		HostsKey:      m.HostsKey.ValueString(),
+		TrustedCAs:    cas,
+	}
+	if !m.UserMapping.IsNull() {
+		var um serverSshUserMappingModel
+		diags.Append(m.UserMapping.As(ctx, &um, basetypesObjectAsOptions)...)
+		cfg.UserMapping = &hoop.ServerSSHUserMap{
+			CertAttribute: um.CertAttr.ValueString(),
+			UserAttribute: um.UserAttr.ValueString(),
+		}
+	}
+	return cfg, diags
+}
+
+// toApi builds the whole row from the plan over current, the gateway's row:
+// the gRPC URL and the blocks neither the plan nor the prior declare pass
+// through unchanged.
+func (m *serverMiscConfigResourceModel) toApi(ctx context.Context, prior *serverMiscConfigResourceModel, current *hoop.ServerMiscConfig) (*hoop.ServerMiscConfig, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	cfg := &hoop.ServerMiscConfig{GrpcServerURL: current.GrpcServerURL}
+
+	rdp, d := toApiProxyConfig(ctx, m.RdpServerConfig, prior.RdpServerConfig, current.RDPServerConfig)
+	diags.Append(d...)
+	cfg.RDPServerConfig = rdp
+
+	pg, d := toApiProxyConfig(ctx, m.PostgresServerConfig, prior.PostgresServerConfig, current.PostgresServerConfig)
+	diags.Append(d...)
+	cfg.PostgresServerConfig = pg
+
+	httpProxy, d := toApiProxyConfig(ctx, m.HttpProxyServerConfig, prior.HttpProxyServerConfig, current.HttpProxyServerConfig)
+	diags.Append(d...)
 	cfg.HttpProxyServerConfig = httpProxy
+
+	ssh, d := toApiSshConfig(ctx, m.SshServerConfig, prior.SshServerConfig, current.SSHServerConfig)
+	diags.Append(d...)
+	cfg.SSHServerConfig = ssh
 	return cfg, diags
 }
 
 // fromApi writes the gateway's answer over prior: the plan after a write, the
-// state on a read. The block lands in state when the prior declared it and
+// state on a read. A block lands in state when the prior declared it and
 // stays null otherwise, however the gateway answers it. An import has no
-// prior and the gateway does not record whether Terraform owns the block, so
-// it sets every to read it in when the gateway holds it.
+// prior and the gateway does not record which blocks Terraform owns, so it
+// sets every to read in each block the gateway holds.
 func (m *serverMiscConfigResourceModel) fromApi(ctx context.Context, prior *serverMiscConfigResourceModel, cfg *hoop.ServerMiscConfig, every bool) diag.Diagnostics {
+	var diags diag.Diagnostics
 	m.ID = types.StringValue(serverMiscConfigID)
-	httpProxy, diags := fromApiProxyConfig(ctx, prior.HttpProxyServerConfig, cfg.HttpProxyServerConfig, every)
+
+	rdp, d := fromApiProxyConfig(ctx, prior.RdpServerConfig, cfg.RDPServerConfig, every)
+	diags.Append(d...)
+	m.RdpServerConfig = rdp
+
+	pg, d := fromApiProxyConfig(ctx, prior.PostgresServerConfig, cfg.PostgresServerConfig, every)
+	diags.Append(d...)
+	m.PostgresServerConfig = pg
+
+	httpProxy, d := fromApiProxyConfig(ctx, prior.HttpProxyServerConfig, cfg.HttpProxyServerConfig, every)
+	diags.Append(d...)
 	m.HttpProxyServerConfig = httpProxy
+
+	ssh, d := fromApiSshConfig(ctx, prior.SshServerConfig, cfg.SSHServerConfig, every)
+	diags.Append(d...)
+	m.SshServerConfig = ssh
 	return diags
 }
 
@@ -156,8 +330,42 @@ func fromApiProxyConfig(ctx context.Context, prior types.Object, cfg *hoop.Serve
 	})
 }
 
+func fromApiSshConfig(ctx context.Context, prior types.Object, cfg *hoop.ServerSSHConfig, every bool) (types.Object, diag.Diagnostics) {
+	null := types.ObjectNull(serverSshConfigObjectType.AttrTypes)
+	if cfg == nil || (prior.IsNull() && !every) {
+		return null, nil
+	}
+
+	p := serverSshConfigModel{TrustedCAs: types.ListNull(types.StringType)}
+	if !prior.IsNull() && !prior.IsUnknown() {
+		if d := prior.As(ctx, &p, basetypesObjectAsOptions); d.HasError() {
+			return null, d
+		}
+	}
+	cas, diags := fromApiStringList(ctx, p.TrustedCAs, cfg.TrustedCAs)
+	if diags.HasError() {
+		return null, diags
+	}
+
+	userMapping := types.ObjectNull(serverSshUserMappingObjectType.AttrTypes)
+	if um := cfg.UserMapping; um != nil {
+		userMapping = types.ObjectValueMust(serverSshUserMappingObjectType.AttrTypes, map[string]attr.Value{
+			"cert_attr": types.StringValue(um.CertAttribute),
+			"user_attr": types.StringValue(um.UserAttribute),
+		})
+	}
+	obj, d := types.ObjectValueFrom(ctx, serverSshConfigObjectType.AttrTypes, serverSshConfigModel{
+		ListenAddress: fromApiString(p.ListenAddress, cfg.ListenAddress),
+		HostsKey:      types.StringValue(cfg.HostsKey),
+		TrustedCAs:    cas,
+		UserMapping:   userMapping,
+	})
+	diags.Append(d...)
+	return obj, diags
+}
+
 // write reads the row, rebuilds it from plan over prior and puts it back, so
-// what the plan leaves out keeps what the gateway holds.
+// the blocks the plan leaves out keep what the gateway holds.
 func (r *serverMiscConfigResource) write(ctx context.Context, plan, prior *serverMiscConfigResourceModel, verb string) diag.Diagnostics {
 	var diags diag.Diagnostics
 	current, err := r.client.GetServerMiscConfig()
@@ -191,8 +399,31 @@ func (r *serverMiscConfigResource) write(ctx context.Context, plan, prior *serve
 // create, the plan of a destroy.
 func serverMiscConfigNone() serverMiscConfigResourceModel {
 	return serverMiscConfigResourceModel{
+		RdpServerConfig:       types.ObjectNull(serverProxyConfigObjectType.AttrTypes),
+		PostgresServerConfig:  types.ObjectNull(serverProxyConfigObjectType.AttrTypes),
 		HttpProxyServerConfig: types.ObjectNull(serverProxyConfigObjectType.AttrTypes),
+		SshServerConfig:       types.ObjectNull(serverSshConfigObjectType.AttrTypes),
 	}
+}
+
+// declaredProxies names the proxies the model declares, in the order the
+// schema lists them.
+func (m *serverMiscConfigResourceModel) declaredProxies() []string {
+	var out []string
+	for _, b := range []struct {
+		name  string
+		block types.Object
+	}{
+		{"RDP", m.RdpServerConfig},
+		{"PostgreSQL", m.PostgresServerConfig},
+		{"HTTP", m.HttpProxyServerConfig},
+		{"SSH", m.SshServerConfig},
+	} {
+		if !b.block.IsNull() {
+			out = append(out, b.name)
+		}
+	}
+	return out
 }
 
 func (r *serverMiscConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -253,13 +484,17 @@ func (r *serverMiscConfigResource) Update(ctx context.Context, req resource.Upda
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// Delete stops the HTTP proxy when the state declared it: the row stays, the
-// gateway has no route to remove it. A gateway without the route has nothing
-// to stop.
+// Delete stops every proxy the state declares: the row stays, the gateway has
+// no route to remove it. With nothing declared there is nothing to stop, and
+// a gateway without the route has nothing either.
 func (r *serverMiscConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state serverMiscConfigResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	stopped := state.declaredProxies()
+	if len(stopped) == 0 {
 		return
 	}
 
@@ -269,7 +504,7 @@ func (r *serverMiscConfigResource) Delete(ctx context.Context, req resource.Dele
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Error Deleting Server Misc Config",
-			fmt.Sprintf("Failed reading the proxy servers configuration before stopping the HTTP proxy: %v", err))
+			fmt.Sprintf("Failed reading the proxy servers configuration before stopping the declared proxies: %v", err))
 		return
 	}
 
@@ -282,17 +517,17 @@ func (r *serverMiscConfigResource) Delete(ctx context.Context, req resource.Dele
 
 	if _, err := r.client.UpdateServerMiscConfig(cfg); err != nil {
 		resp.Diagnostics.AddError("Error Deleting Server Misc Config",
-			fmt.Sprintf("Failed stopping the HTTP proxy: %v", err))
+			fmt.Sprintf("Failed stopping the declared proxies: %v", err))
 		return
 	}
-	resp.Diagnostics.AddWarning("Server Misc Config Proxy Stopped",
-		"The HTTP proxy was stopped; the web app may start it again. "+
-			"The RDP, PostgreSQL and SSH listeners are untouched.")
+	resp.Diagnostics.AddWarning("Server Misc Config Proxies Stopped",
+		fmt.Sprintf("Stopped: %s. The web app may start them again. "+
+			"The blocks Terraform did not declare are untouched.", strings.Join(stopped, ", ")))
 }
 
-// ImportState reads the HTTP proxy block when the gateway holds it: the
-// gateway does not record whether Terraform owns it, so the configuration
-// decides after the import.
+// ImportState reads every block the gateway holds: the gateway does not
+// record which ones Terraform owns, so the configuration decides after the
+// import.
 func (r *serverMiscConfigResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cfg, err := r.client.GetServerMiscConfig()
 	if err != nil {
