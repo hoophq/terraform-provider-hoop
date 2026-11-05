@@ -372,6 +372,10 @@ func clientEndpoints() []endpointCall {
 			[]string{"GET /api/serverconfig/auth"}},
 		{"UpdateServerAuthConfig", func(c *Client) { _, _ = c.UpdateServerAuthConfig(&ServerAuthConfig{AuthMethod: "local"}) },
 			[]string{"PUT /api/serverconfig/auth"}},
+		{"GetServerMiscConfig", func(c *Client) { _, _ = c.GetServerMiscConfig() },
+			[]string{"GET /api/serverconfig/misc"}},
+		{"UpdateServerMiscConfig", func(c *Client) { _, _ = c.UpdateServerMiscConfig(&ServerMiscConfig{}) },
+			[]string{"PUT /api/serverconfig/misc"}},
 	}
 }
 

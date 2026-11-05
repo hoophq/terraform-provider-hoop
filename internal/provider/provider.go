@@ -240,6 +240,7 @@ func (p *hoopProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewAccessRequestRuleResource,
 		NewFeatureFlagResource,
 		NewServerAuthConfigResource,
+		NewServerMiscConfigResource,
 	}
 }
 
