@@ -368,6 +368,14 @@ func clientEndpoints() []endpointCall {
 			[]string{"GET /api/feature-flags"}},
 		{"SetFeatureFlag", func(c *Client) { _, _ = c.SetFeatureFlag(testRuleName, true) },
 			[]string{"PUT /api/feature-flags/" + testRuleName}},
+		{"GetServerAuthConfig", func(c *Client) { _, _ = c.GetServerAuthConfig() },
+			[]string{"GET /api/serverconfig/auth"}},
+		{"UpdateServerAuthConfig", func(c *Client) { _, _ = c.UpdateServerAuthConfig(&ServerAuthConfig{AuthMethod: "local"}) },
+			[]string{"PUT /api/serverconfig/auth"}},
+		{"GetServerMiscConfig", func(c *Client) { _, _ = c.GetServerMiscConfig() },
+			[]string{"GET /api/serverconfig/misc"}},
+		{"UpdateServerMiscConfig", func(c *Client) { _, _ = c.UpdateServerMiscConfig(&ServerMiscConfig{}) },
+			[]string{"PUT /api/serverconfig/misc"}},
 	}
 }
 

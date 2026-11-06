@@ -58,3 +58,22 @@ func httpTestOk(statusCode int, obj any) *http.Response {
 		Body:       io.NopCloser(buf),
 	}
 }
+
+func TestMissingAPIPath(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"https://gateway.example.com/api":      false,
+		"https://gateway.example.com/api/":     false,
+		"https://gateway.example.com/hoop/api": false,
+		"https://gateway.example.com":          true,
+		"https://gateway.example.com/":         true,
+		"https://gateway.example.com/apis":     true,
+		"http://localhost:8009/api?x=1":        false,
+		"http://[::1:8009/api":                 false, // unparsable: the client reports it
+	}
+	for apiURL, want := range cases {
+		if got := missingAPIPath(apiURL); got != want {
+			t.Errorf("missingAPIPath(%q) = %v, want %v", apiURL, got, want)
+		}
+	}
+}
