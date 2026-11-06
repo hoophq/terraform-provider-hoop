@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hoophq/terraform-provider-hoop/internal/hoop"
 )
@@ -153,8 +154,8 @@ resource "hoop_server_auth_config" "this" {
 						"saml_config":                    `null`,
 						"provider_name":                  `""`,
 						"webapp_users_management_status": `"inactive"`,
-						"admin_role_name":                `""`,
-						"auditor_role_name":              `""`,
+						"admin_role_name":                `"admin"`,
+						"auditor_role_name":              `"auditor"`,
 						"api_key":                        "<absent>",
 						"rollout_api_key":                "<absent>",
 					}),
@@ -172,7 +173,7 @@ resource "hoop_server_auth_config" "this" {
 					checkLastBody(gw.rec, "PUT", "/serverconfig/auth", map[string]string{
 						"auth_method": `"oidc"`,
 						"oidc_config": `{"issuer_url":"https://auth.example.com/oidc","client_id":"hoop","client_secret":"s3cret",` +
-							`"scopes":["openid","groups"],"audience":"hoop-gateway","groups_claim":""}`,
+							`"scopes":["openid","groups"],"audience":"hoop-gateway","groups_claim":"groups"}`,
 						"saml_config":                    `null`,
 						"provider_name":                  `"Okta"`,
 						"webapp_users_management_status": `"active"`,
@@ -206,7 +207,7 @@ resource "hoop_server_auth_config" "this" {
 					resource.TestCheckResourceAttr("hoop_server_auth_config.this", "oidc_config.groups_claim", "groups"),
 					checkLastBody(gw.rec, "PUT", "/serverconfig/auth", map[string]string{
 						"oidc_config": `{"issuer_url":"https://auth.example.com/oidc","client_id":"hoop","client_secret":"s3cret",` +
-							`"scopes":["openid","groups"],"audience":"","groups_claim":""}`,
+							`"scopes":["openid","groups"],"audience":"","groups_claim":"groups"}`,
 					}),
 				),
 			},
@@ -228,8 +229,31 @@ resource "hoop_server_auth_config" "this" {
 					resource.TestCheckResourceAttr("hoop_server_auth_config.this", "auditor_role_name", "auditor"),
 					checkLastBody(gw.rec, "PUT", "/serverconfig/auth", map[string]string{
 						"oidc_config":     `null`,
-						"saml_config":     `{"idp_metadata_url":"https://idp.example.com/metadata.xml","groups_claim":""}`,
+						"saml_config":     `{"idp_metadata_url":"https://idp.example.com/metadata.xml","groups_claim":"groups"}`,
 						"admin_role_name": `"hoop-admins"`,
+					}),
+				),
+			},
+			{
+				// admin_role_name left out of the configuration: the plan
+				// puts the gateway's default back.
+				Config: testProviderBlock + `
+resource "hoop_server_auth_config" "this" {
+  auth_method = "saml"
+  saml_config = {
+    idp_metadata_url = "https://idp.example.com/metadata.xml"
+  }
+  webapp_users_management_status = "inactive"
+}`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("hoop_server_auth_config.this", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("hoop_server_auth_config.this", "admin_role_name", "admin"),
+					checkLastBody(gw.rec, "PUT", "/serverconfig/auth", map[string]string{
+						"admin_role_name": `"admin"`,
 					}),
 				),
 			},

@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -161,9 +162,10 @@ func (r *serverAuthConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 						Optional:    true,
 					},
 					"groups_claim": schema.StringAttribute{
-						Description: "The token claim that carries the user's groups. The gateway stores `groups` when left out.",
+						Description: "The token claim that carries the user's groups. Defaults to `groups`.",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("groups"),
 					},
 				},
 			},
@@ -178,9 +180,10 @@ func (r *serverAuthConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 						Validators:  NonEmptyStringValidator,
 					},
 					"groups_claim": schema.StringAttribute{
-						Description: "The assertion attribute that carries the user's groups. The gateway stores `groups` when left out.",
+						Description: "The assertion attribute that carries the user's groups. Defaults to `groups`.",
 						Optional:    true,
 						Computed:    true,
+						Default:     stringdefault.StaticString("groups"),
 					},
 					"resolved_metadata": schema.SingleNestedAttribute{
 						Description: "What the metadata URL resolved to on the last write, so the IdP can be checked.",
@@ -217,14 +220,19 @@ func (r *serverAuthConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 				Validators: webappUsersManagementStatusValidator,
 			},
 			"admin_role_name": schema.StringAttribute{
-				Description: "The group that grants administrator access. The gateway stores `admin` when left out.",
-				Optional:    true,
-				Computed:    true,
+				Description: "The group that grants administrator access. Defaults to `admin`. The gateway authorizes " +
+					"admin routes against this group right away, so the API key the provider uses must belong to the " +
+					"new group (or be the gateway's legacy `API_KEY`) before the change is applied, or the next " +
+					"refresh answers 403.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("admin"),
 			},
 			"auditor_role_name": schema.StringAttribute{
-				Description: "The group that grants auditor access. The gateway stores `auditor` when left out.",
+				Description: "The group that grants auditor access. Defaults to `auditor`.",
 				Optional:    true,
 				Computed:    true,
+				Default:     stringdefault.StaticString("auditor"),
 			},
 			"api_key": schema.StringAttribute{
 				Description: "The admin api key stored in the row after a key rollout; null until one happened. " +

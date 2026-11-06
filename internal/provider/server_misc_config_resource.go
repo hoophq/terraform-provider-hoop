@@ -161,7 +161,7 @@ func (r *serverMiscConfigResource) Schema(_ context.Context, _ resource.SchemaRe
 						Computed:  true,
 						Sensitive: true,
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.UseStateForUnknown(),
+							stringplanmodifier.UseNonNullStateForUnknown(),
 						},
 					},
 					"trusted_cas": schema.ListAttribute{
@@ -354,9 +354,16 @@ func fromApiSshConfig(ctx context.Context, prior types.Object, cfg *hoop.ServerS
 			"user_attr": types.StringValue(um.UserAttribute),
 		})
 	}
+
+	// A stopped proxy answers no key. Null, not "", so the plan of a later
+	// apply that starts the proxy leaves the generated key unknown.
+	hostsKey := types.StringNull()
+	if cfg.HostsKey != "" {
+		hostsKey = types.StringValue(cfg.HostsKey)
+	}
 	obj, d := types.ObjectValueFrom(ctx, serverSshConfigObjectType.AttrTypes, serverSshConfigModel{
 		ListenAddress: fromApiString(p.ListenAddress, cfg.ListenAddress),
-		HostsKey:      types.StringValue(cfg.HostsKey),
+		HostsKey:      hostsKey,
 		TrustedCAs:    cas,
 		UserMapping:   userMapping,
 	})

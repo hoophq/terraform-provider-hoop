@@ -51,8 +51,8 @@ resource "hoop_server_auth_config" "this" {
 
 ### Optional
 
-- `admin_role_name` (String) The group that grants administrator access. The gateway stores `admin` when left out.
-- `auditor_role_name` (String) The group that grants auditor access. The gateway stores `auditor` when left out.
+- `admin_role_name` (String) The group that grants administrator access. Defaults to `admin`. The gateway authorizes admin routes against this group right away, so the API key the provider uses must belong to the new group (or be the gateway's legacy `API_KEY`) before the change is applied, or the next refresh answers 403.
+- `auditor_role_name` (String) The group that grants auditor access. Defaults to `auditor`.
 - `oidc_config` (Attributes) The OIDC / OAuth2 identity provider. The gateway reaches the issuer when the row is written and refuses the write when it cannot. Leaving the block out clears the stored OIDC settings. (see [below for nested schema](#nestedatt--oidc_config))
 - `provider_name` (String) The identity provider's name, shown on the sign-in page. Leaving it out stores none.
 - `saml_config` (Attributes) The SAML 2.0 identity provider. The gateway fetches the metadata when the row is written and refuses the write when it cannot. Leaving the block out clears the stored SAML settings. (see [below for nested schema](#nestedatt--saml_config))
@@ -75,7 +75,7 @@ Optional:
 - `audience` (String) The OAuth2 audience. Leaving it out stores none.
 - `client_assertion_file` (String) Path on the gateway to a JWT that authenticates the client in place of `client_secret` (RFC 7523). It must be the path the gateway operator set in `IDP_CLIENT_ASSERTION_FILE`.
 - `client_secret` (String, Sensitive) The OAuth2 client secret. Set it or `client_assertion_file`, not both.
-- `groups_claim` (String) The token claim that carries the user's groups. The gateway stores `groups` when left out.
+- `groups_claim` (String) The token claim that carries the user's groups. Defaults to `groups`.
 - `scopes` (List of String) Extra OAuth2 scopes appended to `openid`, `profile` and `email`. Leaving it out stores none.
 
 
@@ -88,7 +88,7 @@ Required:
 
 Optional:
 
-- `groups_claim` (String) The assertion attribute that carries the user's groups. The gateway stores `groups` when left out.
+- `groups_claim` (String) The assertion attribute that carries the user's groups. Defaults to `groups`.
 
 Read-Only:
 

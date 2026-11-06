@@ -240,6 +240,48 @@ resource "hoop_server_misc_config" "this" {
 	})
 }
 
+// TestServerMiscConfigResourceStartsStoppedSsh starts an SSH proxy declared
+// stopped: the gateway answers no hosts key while stopped and generates one
+// on start, so the stored state must not pin the empty key.
+func TestServerMiscConfigResourceStartsStoppedSsh(t *testing.T) {
+	gw := newFakeMiscGateway()
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testProviderBlock + `
+resource "hoop_server_misc_config" "this" {
+  ssh_server_config = {}
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("hoop_server_misc_config.this", "ssh_server_config.listen_address"),
+					resource.TestCheckNoResourceAttr("hoop_server_misc_config.this", "ssh_server_config.hosts_key"),
+					checkLastBody(gw.rec, "PUT", "/serverconfig/misc", map[string]string{
+						"ssh_server_config": `{"listen_address":""}`,
+					}),
+				),
+			},
+			{
+				Config: testProviderBlock + `
+resource "hoop_server_misc_config" "this" {
+  ssh_server_config = {
+    listen_address = "0.0.0.0:12222"
+  }
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("hoop_server_misc_config.this", "ssh_server_config.hosts_key", "fake-hosts-key"),
+					checkLastBody(gw.rec, "PUT", "/serverconfig/misc", map[string]string{
+						"ssh_server_config": `{"listen_address":"0.0.0.0:12222"}`,
+					}),
+				),
+			},
+		},
+	})
+}
+
 func TestServerMiscConfigResourceRejectsAtPlan(t *testing.T) {
 	cases := map[string]struct {
 		config string
