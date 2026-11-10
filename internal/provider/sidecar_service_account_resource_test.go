@@ -138,3 +138,47 @@ resource "hoop_sidecar_service_account" "gke" {
 		},
 	})
 }
+
+// The names the gateway refuses at write (validation.ValidateResourceName) are
+// refused at plan.
+func TestSidecarServiceAccountResourceNameValidation(t *testing.T) {
+	gw := newFakeRuleGateway("/sidecar-service-accounts", false)
+	config := func(name string) string {
+		return testProviderBlock + `
+resource "hoop_sidecar_service_account" "gke" {
+  name            = "` + name + `"
+  issuer          = "https://issuer.example.com"
+  audience        = "https://hoop.example.com"
+  claim           = "sub"
+  subject_pattern = "system:serviceaccount:ns:*"
+  name_template   = "gke-{1}"
+}`
+	}
+	badName := regexp.MustCompile(`must contain between 3 and 254 characters`)
+	resource.ParallelTest(t, resource.TestCase{
+		IsUnitTest: true,
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config:      config("ab"),
+				ExpectError: badName,
+			},
+			{
+				Config:      config("a--b"),
+				ExpectError: badName,
+			},
+			{
+				Config:      config("-abc"),
+				ExpectError: badName,
+			},
+			{
+				Config: config("abc"),
+			},
+			{
+				Config: config("gke-eu_1.prod"),
+			},
+		},
+	})
+}

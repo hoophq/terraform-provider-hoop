@@ -3,6 +3,8 @@
 package provider
 
 import (
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
@@ -47,6 +49,17 @@ var PluginConfigNameValidator = []validator.String{
 
 var NonEmptyStringValidator = []validator.String{
 	stringvalidator.LengthAtLeast(1),
+}
+
+// ResourceNameValidator is the gateway's rule for a resource name
+// (gateway/api/validation.ValidateResourceName), checked at plan so a bad name
+// does not fail at apply.
+var ResourceNameValidator = []validator.String{
+	stringvalidator.RegexMatches(
+		regexp.MustCompile(`^[a-zA-Z0-9_]+(?:[-\.]?[a-zA-Z0-9_]+){2,253}$`),
+		"must contain between 3 and 254 characters: letters, digits and `_`, "+
+			"with a single `-` or `.` allowed between them but not at either end",
+	),
 }
 
 var ScoreThresholdValidator = []validator.Float64{

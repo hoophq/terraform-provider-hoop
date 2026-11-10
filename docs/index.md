@@ -19,6 +19,9 @@ The Hoop provider allows managing resources from a Hoop Gateway instance API.
 #
 # Use an organization API key created under Settings > API Keys. The key must be
 # granted the admin group to manage the resources of this provider.
+#
+# api_url is the REST API root: the gateway serves it under /api, so keep that
+# suffix (https://gateway.example.com/api).
 provider "hoop" {
   api_key = "<hpk_...>"
   api_url = "http://localhost:8009/api"
@@ -31,5 +34,5 @@ provider "hoop" {
 ### Optional
 
 - `api_key` (String, Sensitive) The API Key to authenticate in the Hoop Gateway. May also be provided via `HOOP_APIKEY` environment variable.
-- `api_url` (String) The API URL of the Hoop Gateway instance. It may also be provided via `HOOP_APIURL` environment variable.
+- `api_url` (String) The URL of the Hoop Gateway REST API. The gateway serves it under the `/api` path, so include that suffix: `https://gateway.example.com/api`. It may also be provided via the `HOOP_APIURL` environment variable.
 - `auth_scheme` (String) How the API Key is sent to the Hoop Gateway. One of `auto` (default), `bearer` or `api_key`. With `auto`, organization API keys (prefixed `hpk_`) are sent as `Authorization: Bearer <api_key>` and any other value is sent in the legacy `Api-Key` header. Set it explicitly only to override that detection.
