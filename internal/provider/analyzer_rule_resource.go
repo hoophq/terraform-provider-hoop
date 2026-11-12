@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -242,17 +243,67 @@ type analyzerSidecarSpec struct {
 	MediumRisk   string          `json:"medium"`
 	LowRisk      string          `json:"low"`
 	ApprovalRule string          `json:"approval_rule"`
+	// Read for presence only; the gateway checks each entry.
+	Approvers analyzerSpecLevels[json.RawMessage]     `json:"approvers"`
+	Handoffs  analyzerSpecLevels[analyzerSpecHandoff] `json:"handoffs"`
 }
 
-// holds reports whether a risk level keeps a statement for a reviewer, in
-// either of the sidecar's spellings.
-func (s analyzerSidecarSpec) holds() bool {
-	for _, action := range []string{s.HighRisk, s.MediumRisk, s.LowRisk} {
-		if action == "require_review" || action == "require_approval" {
-			return true
-		}
+// analyzerSpecLevels is a per risk level map of a sidecar_spec. JSON null
+// reads as absent, as on the sidecar.
+type analyzerSpecLevels[T any] struct {
+	High   *T `json:"high"`
+	Medium *T `json:"medium"`
+	Low    *T `json:"low"`
+}
+
+// analyzerSpecHandoff is handoffs.<level>. allowed_actions absent (nil) lets
+// the hand-off agent select every action, require_approval included.
+type analyzerSpecHandoff struct {
+	AllowedActions []string `json:"allowed_actions"`
+}
+
+// analyzerSpecLevel is one risk level of a sidecar_spec.
+type analyzerSpecLevel struct {
+	action   string
+	approver *json.RawMessage
+	handoff  *analyzerSpecHandoff
+}
+
+func (s analyzerSidecarSpec) levels() []analyzerSpecLevel {
+	return []analyzerSpecLevel{
+		{s.HighRisk, s.Approvers.High, s.Handoffs.High},
+		{s.MediumRisk, s.Approvers.Medium, s.Handoffs.Medium},
+		{s.LowRisk, s.Approvers.Low, s.Handoffs.Low},
 	}
-	return false
+}
+
+// holdsAction reports an action that keeps a statement for approval, in
+// either of the sidecar's spellings.
+func holdsAction(action string) bool {
+	return action == "require_review" || action == "require_approval"
+}
+
+// held reports a level that can hold a statement: its action holds, or it
+// is an ai-handoff level whose agent may select require_approval.
+func (l analyzerSpecLevel) held() bool {
+	if l.action == "ai-handoff" {
+		return l.handoff == nil || l.handoff.AllowedActions == nil || slices.ContainsFunc(l.handoff.AllowedActions, holdsAction)
+	}
+	return holdsAction(l.action)
+}
+
+// holds reports whether some risk level can hold a statement for approval.
+func (s analyzerSidecarSpec) holds() bool {
+	return slices.ContainsFunc(s.levels(), analyzerSpecLevel.held)
+}
+
+// needsApprovalRule reports a held level with no approvers entry. Such a
+// level files under approval_rule; a level with an entry files under the
+// level. Same check as the gateway (sidecar daemon ruleHolds).
+func (s analyzerSidecarSpec) needsApprovalRule() bool {
+	return slices.ContainsFunc(s.levels(), func(l analyzerSpecLevel) bool {
+		return l.held() && l.approver == nil
+	})
 }
 
 // validateAnalyzerSidecarSpec refuses at plan what the gateway refuses or
@@ -279,11 +330,12 @@ func validateAnalyzerSidecarSpec(data analyzerRuleResourceModel, diags *diag.Dia
 			"sidecar_spec.trigger is an object that narrows which statements are classified, such as "+
 				"{ operations = [\"update\", \"delete\"] }, not a string. Leave it out to classify every statement.")
 	}
-	if spec.holds() && spec.ApprovalRule == "" {
+	if spec.needsApprovalRule() && spec.ApprovalRule == "" {
 		diags.AddAttributeError(path.Root("sidecar_spec"), "Approval Rule Required",
-			"sidecar_spec holds statements for review (require_review) and names no approval_rule. "+
-				"Set approval_rule to this rule's name to have the gateway manage the approval rule from "+
-				"reviewers_groups, pending_ttl_sec and approval_ttl_sec, or to the name of a hoop_access_request_rule.")
+			"sidecar_spec holds statements for approval at a risk level with no approvers entry, and names no "+
+				"approval_rule. Set approval_rule to this rule's name to have the gateway manage the approval rule "+
+				"from reviewers_groups, pending_ttl_sec and approval_ttl_sec, or to the name of a "+
+				"hoop_access_request_rule. Or name the level's approver under approvers.")
 	}
 	ownRule := spec.holds() && spec.ApprovalRule == data.Name.ValueString()
 	for _, setting := range []struct {

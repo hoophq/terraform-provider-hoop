@@ -190,7 +190,9 @@ resource "hoop_ai_session_analyzer_rule" "appdb" {
 }
 ```
 
-Set `approval_rule` to the analyzer rule's own name and it holds under that name: the gateway creates and manages the access request rule for it, and `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec` on `hoop_ai_session_analyzer_rule` drive it. Those three are refused at plan in any other case, since the gateway would ignore them. A hold with no `approval_rule` at all is refused too: nobody could release the statement. Use a separate `hoop_access_request_rule` when several analyzer rules share one approval policy.
+Set `approval_rule` to the analyzer rule's own name and it holds under that name: the gateway creates and manages the access request rule for it, and `reviewers_groups`, `pending_ttl_sec` and `approval_ttl_sec` on `hoop_ai_session_analyzer_rule` drive it. Those three are refused at plan in any other case, since the gateway would ignore them. Use a separate `hoop_access_request_rule` when several analyzer rules share one approval policy.
+
+A held level can also name its own approver under `approvers`, and then it needs no `approval_rule`: `{ type = "human", groups = [...] }` files the review for those groups (the admins when `groups` is left out), `{ type = "human", routing = { ... } }` lets the gateway's routing agent select the groups and who to notify, and `{ type = "ai_agent" }` lets the sidecar's model decide. A held level with no `approvers` entry files under `approval_rule`, so a hold that has such a level and no `approval_rule` is refused at plan: nobody could release the statement. `ai-handoff` levels whose agent may select `require_approval` count as held.
 
 `trigger` narrows which statements are classified, as an object such as `{ operations = ["update", "delete"] }`; leave it out to classify every statement. The sidecar classifies with the model its own configuration names, so a sidecar needs a top-level `analyzer` section (`provider`, `model`, `credentials_file`) before an analyzer rule can be bound to it:
 
