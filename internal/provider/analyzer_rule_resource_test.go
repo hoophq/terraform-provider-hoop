@@ -94,6 +94,16 @@ func TestAnalyzerRuleResourceSidecarSpecValidation(t *testing.T) {
 	}{
 		{"string trigger", `sidecar_spec = jsonencode({ trigger = "statement", high = "block" })`, `Invalid Analyzer Trigger`},
 		{"hold without an approval rule", `sidecar_spec = jsonencode({ high = "require_review" })`, `Approval Rule Required`},
+		{"held level without an approvers entry", `sidecar_spec = jsonencode({
+    high      = "require_review"
+    medium    = "require_approval"
+    approvers = { high = { type = "human", groups = ["dba-leads"] } }
+  })`, `Approval Rule Required`},
+		{"hand-off that can hold, without an approval rule", `sidecar_spec = jsonencode({ high = "ai-handoff" })`, `Approval Rule Required`},
+		{"hand-off allowed to hold, without an approval rule", `sidecar_spec = jsonencode({
+    high     = "ai-handoff"
+    handoffs = { high = { allowed_actions = ["allow", "require_approval"] } }
+  })`, `Approval Rule Required`},
 		{"reviewers under another rule", `
   sidecar_spec     = jsonencode({ high = "require_review", approval_rule = "dba-approvals" })
   reviewers_groups = ["dba-leads"]`, `(?s)Review Setting Has No Effect.*dba-approvals`},
@@ -114,6 +124,57 @@ resource "hoop_ai_session_analyzer_rule" "r" {
   ` + tt.body + `
 }`,
 					ExpectError: regexp.MustCompile(tt.want),
+				}},
+			})
+		})
+	}
+}
+
+// TestAnalyzerRuleResourceHoldWithLevelApprovers: a held level with an
+// approvers entry needs no approval_rule. The gateway files it under the
+// level (ENG-663), so the plan accepts it as the gateway does.
+func TestAnalyzerRuleResourceHoldWithLevelApprovers(t *testing.T) {
+	for _, tt := range []struct{ name, spec string }{
+		{"human with routing", `{
+    high      = "require_approval"
+    approvers = { high = { type = "human", routing = { candidates = ["sre", "dba"], notify = { slack = { delivery = "dm" } } } } }
+  }`},
+		{"human with groups", `{
+    high      = "require_review"
+    approvers = { high = { type = "human", groups = ["dba-leads"] } }
+  }`},
+		{"human with neither: the admins", `{
+    high      = "require_review"
+    approvers = { high = { type = "human" } }
+  }`},
+		{"ai_agent", `{
+    high      = "require_review"
+    medium    = "require_approval"
+    approvers = { high = { type = "ai_agent" }, medium = { type = "ai_agent", prompt = "Approve reads" } }
+  }`},
+		{"hand-off level", `{
+    high      = "ai-handoff"
+    approvers = { high = { type = "human", groups = ["sre"] } }
+  }`},
+		{"hand-off that cannot hold", `{
+    high     = "ai-handoff"
+    handoffs = { high = { allowed_actions = ["allow", "block"] } }
+  }`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := newFakeRuleGateway("/ai/session-analyzer/rules", true)
+			resource.ParallelTest(t, resource.TestCase{
+				IsUnitTest: true,
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"hoop": providerserver.NewProtocol6WithError(New("test", clientFunc(gw.handle))()),
+				},
+				Steps: []resource.TestStep{{
+					Config: testProviderBlock + `
+resource "hoop_ai_session_analyzer_rule" "r" {
+  name = "r"` + analyzerRiskEvaluation + `
+  sidecar_spec = jsonencode(` + tt.spec + `)
+}`,
+					Check: resource.TestCheckResourceAttrSet("hoop_ai_session_analyzer_rule.r", "id"),
 				}},
 			})
 		})
